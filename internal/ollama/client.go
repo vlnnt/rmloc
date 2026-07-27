@@ -104,8 +104,9 @@ func (c *Client) translate(
 
 				c.recordSafetyFallback(1)
 				fmt.Printf(
-					"Предупреждение: строку не удалось безопасно перевести; "+
-						"она оставлена без изменений. Текст: %q. Причина: %v\n",
+					"Warning: the text could not be translated safely; "+
+						"the original text was left unchanged. "+
+						"Text: %q. Reason: %v\n",
 					truncateForLog(text, 180),
 					err,
 				)
@@ -214,9 +215,9 @@ func (c *Client) TranslateLines(
 				}
 
 				fmt.Printf(
-					"Предупреждение: групповой перевод из %d строк "+
-						"не прошёл проверку; строки будут переведены по одной. "+
-						"Причина: %v\n",
+					"Warning: the grouped translation of %d lines "+
+						"failed validation; the lines will be translated "+
+						"individually. Reason: %v\n",
 					len(lines),
 					err,
 				)
@@ -396,7 +397,6 @@ func validateTranslation(
 	protected protectedText,
 ) (string, error) {
 	translation = strings.TrimSpace(translation)
-
 	if translation == "" {
 		return "", fmt.Errorf(
 			"Ollama returned empty translation",

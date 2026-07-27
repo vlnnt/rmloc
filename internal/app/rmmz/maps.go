@@ -47,9 +47,13 @@ func (a *RmmzEngine) ProcessMap(
 		)
 	}
 
-	fmt.Printf("Найден файл: %s\n", mapPath)
 	fmt.Printf(
-		"Найдено строк в %s: %d\n",
+		"Found file: %s\n",
+		mapPath,
+	)
+
+	fmt.Printf(
+		"Found text entries in %s: %d\n",
 		filepath.Base(mapPath),
 		len(texts),
 	)
@@ -212,8 +216,15 @@ func (a *RmmzEngine) ProcessMap(
 		)
 	}
 
-	fmt.Printf("Перевод сохранён: %s\n", mapPath)
-	fmt.Printf("Оригинал сохранён: %s\n\n", backupPath)
+	fmt.Printf(
+		"Translation saved: %s\n",
+		mapPath,
+	)
+
+	fmt.Printf(
+		"Original file backed up: %s\n\n",
+		backupPath,
+	)
 
 	return nil
 }
@@ -246,7 +257,9 @@ func (a *RmmzEngine) translateMapTextBlock(
 		len(lines),
 	)
 
-	translatedLines, err := a.ollamaClient.TranslateLines(lines)
+	translatedLines, err := a.ollamaClient.TranslateLines(
+		lines,
+	)
 	if err != nil {
 		return fmt.Errorf(
 			"translate %s block event %d page %d commands %d-%d field %s: %w",
@@ -408,8 +421,15 @@ func (a *RmmzEngine) FindMapFiles(
 	}
 
 	candidates := []string{
-		filepath.Join(rootDir, "data"),
-		filepath.Join(rootDir, "www", "data"),
+		filepath.Join(
+			rootDir,
+			"data",
+		),
+		filepath.Join(
+			rootDir,
+			"www",
+			"data",
+		),
 		rootDir,
 	}
 
@@ -424,7 +444,11 @@ func (a *RmmzEngine) FindMapFiles(
 		}
 	}
 
-	mapFiles := make([]string, 0)
+	mapFiles := make(
+		[]string,
+		0,
+	)
+
 	err = filepath.WalkDir(
 		rootDir,
 		func(
@@ -436,19 +460,26 @@ func (a *RmmzEngine) FindMapFiles(
 
 			if entry.IsDir() {
 				switch entry.Name() {
-				case ".git", "node_modules", "old", ".rmloc":
+				case ".git",
+					"node_modules",
+					"old",
+					".rmloc":
 					return filepath.SkipDir
 				}
 
 				return nil
 			}
 
-			if !mapFilePattern.MatchString(entry.Name()) {
+			if !mapFilePattern.MatchString(
+				entry.Name(),
+			) {
 				return nil
 			}
 
 			if !strings.EqualFold(
-				filepath.Base(filepath.Dir(path)),
+				filepath.Base(
+					filepath.Dir(path),
+				),
 				"data",
 			) {
 				return nil
@@ -478,7 +509,7 @@ func (a *RmmzEngine) FindMapFiles(
 
 	sort.Strings(mapFiles)
 	fmt.Printf(
-		"Найдено карт: %d\n",
+		"Found maps: %d\n",
 		len(mapFiles),
 	)
 
@@ -676,13 +707,19 @@ func readMapFiles(
 		)
 	}
 
-	mapFiles := make([]string, 0)
+	mapFiles := make(
+		[]string,
+		0,
+	)
+
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 
-		if !mapFilePattern.MatchString(entry.Name()) {
+		if !mapFilePattern.MatchString(
+			entry.Name(),
+		) {
 			continue
 		}
 
@@ -698,7 +735,7 @@ func readMapFiles(
 	sort.Strings(mapFiles)
 	if len(mapFiles) > 0 {
 		fmt.Printf(
-			"Найдено карт: %d\n",
+			"Found maps: %d\n",
 			len(mapFiles),
 		)
 	}

@@ -7,9 +7,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"rmloc/internal/engine/rmmz/actors"
 	"strings"
 	"time"
+
+	"rmloc/internal/engine/rmmz/actors"
 )
 
 func (a *RmmzEngine) ProcessActors(
@@ -35,8 +36,8 @@ func (a *RmmzEngine) ProcessActors(
 		return fmt.Errorf("extract Actors.json: %w", err)
 	}
 
-	fmt.Printf("Найден файл: %s\n", actorsPath)
-	fmt.Printf("Найдено строк: %d\n", len(texts))
+	fmt.Printf("Found file: %s\n", actorsPath)
+	fmt.Printf("Found text entries: %d\n", len(texts))
 
 	cache := make(map[string]string)
 	for index := range texts {
@@ -69,6 +70,7 @@ func (a *RmmzEngine) ProcessActors(
 					text.Field,
 				)
 			}
+
 			cache[text.Text] = translated
 		}
 		text.Text = translated
@@ -88,7 +90,10 @@ func (a *RmmzEngine) ProcessActors(
 		translatedData,
 		fileInfo.Mode().Perm(),
 	); err != nil {
-		return fmt.Errorf("write temporary Actors.json: %w", err)
+		return fmt.Errorf(
+			"write temporary Actors.json: %w",
+			err,
+		)
 	}
 
 	defer os.Remove(tempPath)
@@ -97,8 +102,14 @@ func (a *RmmzEngine) ProcessActors(
 		"old",
 	)
 
-	if err := os.MkdirAll(oldDir, 0755); err != nil {
-		return fmt.Errorf("create old directory: %w", err)
+	if err := os.MkdirAll(
+		oldDir,
+		0755,
+	); err != nil {
+		return fmt.Errorf(
+			"create old directory: %w",
+			err,
+		)
 	}
 
 	backupName := fmt.Sprintf(
@@ -115,7 +126,10 @@ func (a *RmmzEngine) ProcessActors(
 		actorsPath,
 		backupPath,
 	); err != nil {
-		return fmt.Errorf("move original Actors.json: %w", err)
+		return fmt.Errorf(
+			"move original Actors.json: %w",
+			err,
+		)
 	}
 
 	if err := os.Rename(
@@ -135,11 +149,21 @@ func (a *RmmzEngine) ProcessActors(
 			)
 		}
 
-		return fmt.Errorf("replace Actors.json: %w", err)
+		return fmt.Errorf(
+			"replace Actors.json: %w",
+			err,
+		)
 	}
 
-	fmt.Printf("Перевод сохранён: %s\n", actorsPath)
-	fmt.Printf("Оригинал сохранён: %s\n\n", backupPath)
+	fmt.Printf(
+		"Translation saved: %s\n",
+		actorsPath,
+	)
+
+	fmt.Printf(
+		"Original file backed up: %s\n\n",
+		backupPath,
+	)
 
 	return nil
 }
@@ -149,22 +173,43 @@ func findActorsFile(
 ) (string, error) {
 	rootDir, err := filepath.Abs(gameDir)
 	if err != nil {
-		return "", fmt.Errorf("resolve game directory: %w", err)
+		return "", fmt.Errorf(
+			"resolve game directory: %w",
+			err,
+		)
 	}
 
 	info, err := os.Stat(rootDir)
 	if err != nil {
-		return "", fmt.Errorf("open game directory: %w", err)
+		return "", fmt.Errorf(
+			"open game directory: %w",
+			err,
+		)
 	}
 
 	if !info.IsDir() {
-		return "", fmt.Errorf("game path is not a directory: %s", rootDir)
+		return "", fmt.Errorf(
+			"game path is not a directory: %s",
+			rootDir,
+		)
 	}
 
 	candidates := []string{
-		filepath.Join(rootDir, "data", "Actors.json"),
-		filepath.Join(rootDir, "www", "data", "Actors.json"),
-		filepath.Join(rootDir, "Actors.json"),
+		filepath.Join(
+			rootDir,
+			"data",
+			"Actors.json",
+		),
+		filepath.Join(
+			rootDir,
+			"www",
+			"data",
+			"Actors.json",
+		),
+		filepath.Join(
+			rootDir,
+			"Actors.json",
+		),
 	}
 
 	for _, candidate := range candidates {
@@ -196,16 +241,22 @@ func findActorsFile(
 				return nil
 			}
 
-			if filepath.Base(filepath.Dir(path)) != "data" {
+			if filepath.Base(
+				filepath.Dir(path),
+			) != "data" {
 				return nil
 			}
 
 			actorsPath = path
+
 			return fs.SkipAll
 		},
 	)
 	if err != nil {
-		return "", fmt.Errorf("search Actors.json: %w", err)
+		return "", fmt.Errorf(
+			"search Actors.json: %w",
+			err,
+		)
 	}
 
 	if actorsPath == "" {
@@ -223,12 +274,19 @@ func applyActorTranslations(
 	texts []actors.ActorText,
 ) ([]byte, error) {
 	var records []map[string]any
-	if err := json.Unmarshal(sourceData, &records); err != nil {
-		return nil, fmt.Errorf("decode Actors.json: %w", err)
+	if err := json.Unmarshal(
+		sourceData,
+		&records,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"decode Actors.json: %w",
+			err,
+		)
 	}
 
 	for _, text := range texts {
-		if text.ActorIndex < 0 || text.ActorIndex >= len(records) {
+		if text.ActorIndex < 0 ||
+			text.ActorIndex >= len(records) {
 			return nil, fmt.Errorf(
 				"actor index is out of range: %d",
 				text.ActorIndex,
@@ -251,7 +309,10 @@ func applyActorTranslations(
 	encoder.SetEscapeHTML(false)
 
 	if err := encoder.Encode(records); err != nil {
-		return nil, fmt.Errorf("encode Actors.json: %w", err)
+		return nil, fmt.Errorf(
+			"encode Actors.json: %w",
+			err,
+		)
 	}
 
 	return output.Bytes(), nil

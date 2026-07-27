@@ -87,77 +87,77 @@ func (c *Client) PrintMetrics(
 	metrics := c.Metrics()
 
 	fmt.Fprintln(writer)
-	fmt.Fprintln(writer, "Статистика перевода:")
+	fmt.Fprintln(writer, "Translation statistics:")
 
 	fmt.Fprintf(
 		writer,
-		"  Обработано строк: %d\n",
+		"  Processed text entries: %d\n",
 		metrics.InputTexts,
 	)
 
 	fmt.Fprintf(
 		writer,
-		"  Переведено моделью: %d\n",
+		"  Translated by model: %d\n",
 		metrics.ModelTranslatedTexts,
 	)
 
 	fmt.Fprintf(
 		writer,
-		"  Оставлено оригиналом после ошибок защиты: %d\n",
+		"  Left unchanged after protection errors: %d\n",
 		metrics.SafetyFallbackTexts,
 	)
 
 	fmt.Fprintf(
 		writer,
-		"  Получено из кэша: %d\n",
+		"  Loaded from cache: %d\n",
 		metrics.CacheHits,
 	)
 
 	fmt.Fprintf(
 		writer,
-		"  Пропущено без перевода: %d\n",
+		"  Skipped without translation: %d\n",
 		metrics.SkippedTexts,
 	)
 
 	fmt.Fprintf(
 		writer,
-		"  HTTP-запросов: %d\n",
+		"  HTTP requests: %d\n",
 		metrics.HTTPAttempts,
 	)
 
 	fmt.Fprintf(
 		writer,
-		"  Успешных HTTP-запросов: %d\n",
+		"  Successful HTTP requests: %d\n",
 		metrics.SuccessfulHTTPRequests,
 	)
 
 	fmt.Fprintf(
 		writer,
-		"  Неудачных HTTP-попыток: %d\n",
+		"  Failed HTTP attempts: %d\n",
 		metrics.FailedHTTPAttempts,
 	)
 
 	fmt.Fprintf(
 		writer,
-		"  Повторных попыток: %d\n",
+		"  Retry attempts: %d\n",
 		metrics.RetryAttempts,
 	)
 
 	fmt.Fprintf(
 		writer,
-		"  Токенов промпта: %d\n",
+		"  Prompt tokens: %d\n",
 		metrics.PromptTokens,
 	)
 
 	fmt.Fprintf(
 		writer,
-		"  Сгенерировано токенов: %d\n",
+		"  Generated tokens: %d\n",
 		metrics.GeneratedTokens,
 	)
 
 	fmt.Fprintf(
 		writer,
-		"  Время Ollama: %s\n",
+		"  Ollama processing time: %s\n",
 		formatMetricDuration(
 			metrics.OllamaTotalDuration,
 		),
@@ -165,7 +165,7 @@ func (c *Client) PrintMetrics(
 
 	fmt.Fprintf(
 		writer,
-		"  Время ожидания HTTP: %s\n",
+		"  HTTP wait time: %s\n",
 		formatMetricDuration(
 			metrics.HTTPWallDuration,
 		),
@@ -173,7 +173,7 @@ func (c *Client) PrintMetrics(
 
 	fmt.Fprintf(
 		writer,
-		"  Загрузка модели: %s\n",
+		"  Model loading time: %s\n",
 		formatMetricDuration(
 			metrics.OllamaLoadDuration,
 		),
@@ -182,7 +182,7 @@ func (c *Client) PrintMetrics(
 	if metrics.PromptEvaluationDuration > 0 {
 		fmt.Fprintf(
 			writer,
-			"  Скорость обработки промпта: %.1f токенов/с\n",
+			"  Prompt processing speed: %.1f tokens/s\n",
 			tokensPerSecond(
 				metrics.PromptTokens,
 				metrics.PromptEvaluationDuration,
@@ -193,7 +193,7 @@ func (c *Client) PrintMetrics(
 	if metrics.GenerationDuration > 0 {
 		fmt.Fprintf(
 			writer,
-			"  Скорость генерации: %.1f токенов/с\n",
+			"  Generation speed: %.1f tokens/s\n",
 			tokensPerSecond(
 				metrics.GeneratedTokens,
 				metrics.GenerationDuration,

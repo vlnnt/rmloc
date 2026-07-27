@@ -7,9 +7,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"rmloc/internal/engine/rmmz/items"
 	"strings"
 	"time"
+
+	"rmloc/internal/engine/rmmz/items"
 )
 
 func (a *RmmzEngine) ProcessItems(
@@ -22,21 +23,37 @@ func (a *RmmzEngine) ProcessItems(
 
 	sourceData, err := os.ReadFile(itemsPath)
 	if err != nil {
-		return fmt.Errorf("read Items.json: %w", err)
+		return fmt.Errorf(
+			"read Items.json: %w",
+			err,
+		)
 	}
 
 	fileInfo, err := os.Stat(itemsPath)
 	if err != nil {
-		return fmt.Errorf("stat Items.json: %w", err)
+		return fmt.Errorf(
+			"stat Items.json: %w",
+			err,
+		)
 	}
 
 	texts, err := items.Extract(itemsPath)
 	if err != nil {
-		return fmt.Errorf("extract Items.json: %w", err)
+		return fmt.Errorf(
+			"extract Items.json: %w",
+			err,
+		)
 	}
 
-	fmt.Printf("Найден файл: %s\n", itemsPath)
-	fmt.Printf("Найдено строк: %d\n", len(texts))
+	fmt.Printf(
+		"Found file: %s\n",
+		itemsPath,
+	)
+
+	fmt.Printf(
+		"Found text entries: %d\n",
+		len(texts),
+	)
 
 	cache := make(map[string]string)
 	for index := range texts {
@@ -52,7 +69,9 @@ func (a *RmmzEngine) ProcessItems(
 
 		translated, exists := cache[text.Text]
 		if !exists {
-			translated, err = a.ollamaClient.Translate(text.Text)
+			translated, err = a.ollamaClient.Translate(
+				text.Text,
+			)
 			if err != nil {
 				return fmt.Errorf(
 					"translate item %d field %s: %w",
@@ -88,7 +107,10 @@ func (a *RmmzEngine) ProcessItems(
 		translatedData,
 		fileInfo.Mode().Perm(),
 	); err != nil {
-		return fmt.Errorf("write temporary Items.json: %w", err)
+		return fmt.Errorf(
+			"write temporary Items.json: %w",
+			err,
+		)
 	}
 
 	defer os.Remove(tempPath)
@@ -97,8 +119,14 @@ func (a *RmmzEngine) ProcessItems(
 		"old",
 	)
 
-	if err := os.MkdirAll(oldDir, 0755); err != nil {
-		return fmt.Errorf("create old directory: %w", err)
+	if err := os.MkdirAll(
+		oldDir,
+		0755,
+	); err != nil {
+		return fmt.Errorf(
+			"create old directory: %w",
+			err,
+		)
 	}
 
 	backupName := fmt.Sprintf(
@@ -115,7 +143,10 @@ func (a *RmmzEngine) ProcessItems(
 		itemsPath,
 		backupPath,
 	); err != nil {
-		return fmt.Errorf("move original Items.json: %w", err)
+		return fmt.Errorf(
+			"move original Items.json: %w",
+			err,
+		)
 	}
 
 	if err := os.Rename(
@@ -134,11 +165,22 @@ func (a *RmmzEngine) ProcessItems(
 				restoreErr,
 			)
 		}
-		return fmt.Errorf("replace Items.json: %w", err)
+
+		return fmt.Errorf(
+			"replace Items.json: %w",
+			err,
+		)
 	}
 
-	fmt.Printf("Перевод сохранён: %s\n", itemsPath)
-	fmt.Printf("Оригинал сохранён: %s\n\n", backupPath)
+	fmt.Printf(
+		"Translation saved: %s\n",
+		itemsPath,
+	)
+
+	fmt.Printf(
+		"Original file backed up: %s\n\n",
+		backupPath,
+	)
 
 	return nil
 }
@@ -155,9 +197,21 @@ func findItemsFile(
 	}
 
 	candidates := []string{
-		filepath.Join(rootDir, "data", "Items.json"),
-		filepath.Join(rootDir, "www", "data", "Items.json"),
-		filepath.Join(rootDir, "Items.json"),
+		filepath.Join(
+			rootDir,
+			"data",
+			"Items.json",
+		),
+		filepath.Join(
+			rootDir,
+			"www",
+			"data",
+			"Items.json",
+		),
+		filepath.Join(
+			rootDir,
+			"Items.json",
+		),
 	}
 
 	for _, candidate := range candidates {
@@ -190,7 +244,9 @@ func findItemsFile(
 			}
 
 			if !strings.EqualFold(
-				filepath.Base(filepath.Dir(path)),
+				filepath.Base(
+					filepath.Dir(path),
+				),
 				"data",
 			) {
 				return nil
@@ -222,8 +278,15 @@ func applyItemTranslations(
 	texts []items.ItemText,
 ) ([]byte, error) {
 	var records []map[string]any
-	if err := json.Unmarshal(sourceData, &records); err != nil {
-		return nil, fmt.Errorf("decode Items.json: %w", err)
+
+	if err := json.Unmarshal(
+		sourceData,
+		&records,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"decode Items.json: %w",
+			err,
+		)
 	}
 
 	for _, text := range texts {
@@ -242,6 +305,7 @@ func applyItemTranslations(
 				text.ItemIndex,
 			)
 		}
+
 		record[text.Field] = text.Text
 	}
 
@@ -251,7 +315,10 @@ func applyItemTranslations(
 	encoder.SetEscapeHTML(false)
 
 	if err := encoder.Encode(records); err != nil {
-		return nil, fmt.Errorf("encode Items.json: %w", err)
+		return nil, fmt.Errorf(
+			"encode Items.json: %w",
+			err,
+		)
 	}
 
 	return output.Bytes(), nil

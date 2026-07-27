@@ -7,9 +7,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"rmloc/internal/engine/rmmz/states"
 	"strings"
 	"time"
+
+	"rmloc/internal/engine/rmmz/states"
 )
 
 func (a *RmmzEngine) ProcessStates(
@@ -35,8 +36,8 @@ func (a *RmmzEngine) ProcessStates(
 		return fmt.Errorf("extract States.json: %w", err)
 	}
 
-	fmt.Printf("Найден файл: %s\n", statesPath)
-	fmt.Printf("Найдено строк: %d\n", len(texts))
+	fmt.Printf("Found file: %s\n", statesPath)
+	fmt.Printf("Found text entries: %d\n", len(texts))
 
 	cache := make(map[string]string)
 	for index := range texts {
@@ -89,7 +90,10 @@ func (a *RmmzEngine) ProcessStates(
 		translatedData,
 		fileInfo.Mode().Perm(),
 	); err != nil {
-		return fmt.Errorf("write temporary States.json: %w", err)
+		return fmt.Errorf(
+			"write temporary States.json: %w",
+			err,
+		)
 	}
 
 	defer os.Remove(tempPath)
@@ -98,8 +102,14 @@ func (a *RmmzEngine) ProcessStates(
 		"old",
 	)
 
-	if err := os.MkdirAll(oldDir, 0755); err != nil {
-		return fmt.Errorf("create old directory: %w", err)
+	if err := os.MkdirAll(
+		oldDir,
+		0755,
+	); err != nil {
+		return fmt.Errorf(
+			"create old directory: %w",
+			err,
+		)
 	}
 
 	backupName := fmt.Sprintf(
@@ -116,7 +126,10 @@ func (a *RmmzEngine) ProcessStates(
 		statesPath,
 		backupPath,
 	); err != nil {
-		return fmt.Errorf("move original States.json: %w", err)
+		return fmt.Errorf(
+			"move original States.json: %w",
+			err,
+		)
 	}
 
 	if err := os.Rename(
@@ -135,11 +148,22 @@ func (a *RmmzEngine) ProcessStates(
 				restoreErr,
 			)
 		}
-		return fmt.Errorf("replace States.json: %w", err)
+
+		return fmt.Errorf(
+			"replace States.json: %w",
+			err,
+		)
 	}
 
-	fmt.Printf("Перевод сохранён: %s\n", statesPath)
-	fmt.Printf("Оригинал сохранён: %s\n\n", backupPath)
+	fmt.Printf(
+		"Translation saved: %s\n",
+		statesPath,
+	)
+
+	fmt.Printf(
+		"Original file backed up: %s\n\n",
+		backupPath,
+	)
 
 	return nil
 }
@@ -156,9 +180,21 @@ func findStatesFile(
 	}
 
 	candidates := []string{
-		filepath.Join(rootDir, "data", "States.json"),
-		filepath.Join(rootDir, "www", "data", "States.json"),
-		filepath.Join(rootDir, "States.json"),
+		filepath.Join(
+			rootDir,
+			"data",
+			"States.json",
+		),
+		filepath.Join(
+			rootDir,
+			"www",
+			"data",
+			"States.json",
+		),
+		filepath.Join(
+			rootDir,
+			"States.json",
+		),
 	}
 
 	for _, candidate := range candidates {
@@ -171,9 +207,7 @@ func findStatesFile(
 	err = filepath.WalkDir(
 		rootDir,
 		func(
-			path string,
-			entry fs.DirEntry,
-			walkErr error,
+			path string, entry fs.DirEntry, walkErr error,
 		) error {
 			if walkErr != nil {
 				return walkErr
@@ -193,7 +227,9 @@ func findStatesFile(
 			}
 
 			if !strings.EqualFold(
-				filepath.Base(filepath.Dir(path)),
+				filepath.Base(
+					filepath.Dir(path),
+				),
 				"data",
 			) {
 				return nil
@@ -225,8 +261,14 @@ func applyStateTranslations(
 	texts []states.StateText,
 ) ([]byte, error) {
 	var records []map[string]any
-	if err := json.Unmarshal(sourceData, &records); err != nil {
-		return nil, fmt.Errorf("decode States.json: %w", err)
+	if err := json.Unmarshal(
+		sourceData,
+		&records,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"decode States.json: %w",
+			err,
+		)
 	}
 
 	for _, text := range texts {
@@ -254,7 +296,10 @@ func applyStateTranslations(
 	encoder.SetEscapeHTML(false)
 
 	if err := encoder.Encode(records); err != nil {
-		return nil, fmt.Errorf("encode States.json: %w", err)
+		return nil, fmt.Errorf(
+			"encode States.json: %w",
+			err,
+		)
 	}
 
 	return output.Bytes(), nil

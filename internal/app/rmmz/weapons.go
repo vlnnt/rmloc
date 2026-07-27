@@ -7,9 +7,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"rmloc/internal/engine/rmmz/weapons"
 	"strings"
 	"time"
+
+	"rmloc/internal/engine/rmmz/weapons"
 )
 
 func (a *RmmzEngine) ProcessWeapons(
@@ -22,21 +23,37 @@ func (a *RmmzEngine) ProcessWeapons(
 
 	sourceData, err := os.ReadFile(weaponsPath)
 	if err != nil {
-		return fmt.Errorf("read Weapons.json: %w", err)
+		return fmt.Errorf(
+			"read Weapons.json: %w",
+			err,
+		)
 	}
 
 	fileInfo, err := os.Stat(weaponsPath)
 	if err != nil {
-		return fmt.Errorf("stat Weapons.json: %w", err)
+		return fmt.Errorf(
+			"stat Weapons.json: %w",
+			err,
+		)
 	}
 
 	texts, err := weapons.Extract(weaponsPath)
 	if err != nil {
-		return fmt.Errorf("extract Weapons.json: %w", err)
+		return fmt.Errorf(
+			"extract Weapons.json: %w",
+			err,
+		)
 	}
 
-	fmt.Printf("Найден файл: %s\n", weaponsPath)
-	fmt.Printf("Найдено строк: %d\n", len(texts))
+	fmt.Printf(
+		"Found file: %s\n",
+		weaponsPath,
+	)
+
+	fmt.Printf(
+		"Found text entries: %d\n",
+		len(texts),
+	)
 
 	cache := make(map[string]string)
 	for index := range texts {
@@ -53,7 +70,9 @@ func (a *RmmzEngine) ProcessWeapons(
 
 		translated, exists := cache[text.Text]
 		if !exists {
-			translated, err = a.ollamaClient.Translate(text.Text)
+			translated, err = a.ollamaClient.Translate(
+				text.Text,
+			)
 			if err != nil {
 				return fmt.Errorf(
 					"translate weapon %d field %s: %w",
@@ -89,18 +108,26 @@ func (a *RmmzEngine) ProcessWeapons(
 		translatedData,
 		fileInfo.Mode().Perm(),
 	); err != nil {
-		return fmt.Errorf("write temporary Weapons.json: %w", err)
+		return fmt.Errorf(
+			"write temporary Weapons.json: %w",
+			err,
+		)
 	}
 
 	defer os.Remove(tempPath)
-
 	oldDir := filepath.Join(
 		filepath.Dir(weaponsPath),
 		"old",
 	)
 
-	if err := os.MkdirAll(oldDir, 0755); err != nil {
-		return fmt.Errorf("create old directory: %w", err)
+	if err := os.MkdirAll(
+		oldDir,
+		0755,
+	); err != nil {
+		return fmt.Errorf(
+			"create old directory: %w",
+			err,
+		)
 	}
 
 	backupName := fmt.Sprintf(
@@ -117,7 +144,10 @@ func (a *RmmzEngine) ProcessWeapons(
 		weaponsPath,
 		backupPath,
 	); err != nil {
-		return fmt.Errorf("move original Weapons.json: %w", err)
+		return fmt.Errorf(
+			"move original Weapons.json: %w",
+			err,
+		)
 	}
 
 	if err := os.Rename(
@@ -137,11 +167,21 @@ func (a *RmmzEngine) ProcessWeapons(
 			)
 		}
 
-		return fmt.Errorf("replace Weapons.json: %w", err)
+		return fmt.Errorf(
+			"replace Weapons.json: %w",
+			err,
+		)
 	}
 
-	fmt.Printf("Перевод сохранён: %s\n", weaponsPath)
-	fmt.Printf("Оригинал сохранён: %s\n\n", backupPath)
+	fmt.Printf(
+		"Translation saved: %s\n",
+		weaponsPath,
+	)
+
+	fmt.Printf(
+		"Original file backed up: %s\n\n",
+		backupPath,
+	)
 
 	return nil
 }
@@ -158,9 +198,21 @@ func findWeaponsFile(
 	}
 
 	candidates := []string{
-		filepath.Join(rootDir, "data", "Weapons.json"),
-		filepath.Join(rootDir, "www", "data", "Weapons.json"),
-		filepath.Join(rootDir, "Weapons.json"),
+		filepath.Join(
+			rootDir,
+			"data",
+			"Weapons.json",
+		),
+		filepath.Join(
+			rootDir,
+			"www",
+			"data",
+			"Weapons.json",
+		),
+		filepath.Join(
+			rootDir,
+			"Weapons.json",
+		),
 	}
 
 	for _, candidate := range candidates {
@@ -193,7 +245,9 @@ func findWeaponsFile(
 			}
 
 			if !strings.EqualFold(
-				filepath.Base(filepath.Dir(path)),
+				filepath.Base(
+					filepath.Dir(path),
+				),
 				"data",
 			) {
 				return nil
@@ -225,8 +279,14 @@ func applyWeaponTranslations(
 	texts []weapons.WeaponText,
 ) ([]byte, error) {
 	var records []map[string]any
-	if err := json.Unmarshal(sourceData, &records); err != nil {
-		return nil, fmt.Errorf("decode Weapons.json: %w", err)
+	if err := json.Unmarshal(
+		sourceData,
+		&records,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"decode Weapons.json: %w",
+			err,
+		)
 	}
 
 	for _, text := range texts {
@@ -254,7 +314,10 @@ func applyWeaponTranslations(
 	encoder.SetEscapeHTML(false)
 
 	if err := encoder.Encode(records); err != nil {
-		return nil, fmt.Errorf("encode Weapons.json: %w", err)
+		return nil, fmt.Errorf(
+			"encode Weapons.json: %w",
+			err,
+		)
 	}
 
 	return output.Bytes(), nil

@@ -7,9 +7,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"rmloc/internal/engine/rmmz/skills"
 	"strings"
 	"time"
+
+	"rmloc/internal/engine/rmmz/skills"
 )
 
 func (a *RmmzEngine) ProcessSkills(
@@ -22,21 +23,37 @@ func (a *RmmzEngine) ProcessSkills(
 
 	sourceData, err := os.ReadFile(skillsPath)
 	if err != nil {
-		return fmt.Errorf("read Skills.json: %w", err)
+		return fmt.Errorf(
+			"read Skills.json: %w",
+			err,
+		)
 	}
 
 	fileInfo, err := os.Stat(skillsPath)
 	if err != nil {
-		return fmt.Errorf("stat Skills.json: %w", err)
+		return fmt.Errorf(
+			"stat Skills.json: %w",
+			err,
+		)
 	}
 
 	texts, err := skills.Extract(skillsPath)
 	if err != nil {
-		return fmt.Errorf("extract Skills.json: %w", err)
+		return fmt.Errorf(
+			"extract Skills.json: %w",
+			err,
+		)
 	}
 
-	fmt.Printf("Найден файл: %s\n", skillsPath)
-	fmt.Printf("Найдено строк: %d\n", len(texts))
+	fmt.Printf(
+		"Found file: %s\n",
+		skillsPath,
+	)
+
+	fmt.Printf(
+		"Found text entries: %d\n",
+		len(texts),
+	)
 
 	cache := make(map[string]string)
 	for index := range texts {
@@ -52,7 +69,9 @@ func (a *RmmzEngine) ProcessSkills(
 
 		translated, exists := cache[text.Text]
 		if !exists {
-			translated, err = a.ollamaClient.Translate(text.Text)
+			translated, err = a.ollamaClient.Translate(
+				text.Text,
+			)
 			if err != nil {
 				return fmt.Errorf(
 					"translate skill %d field %s: %w",
@@ -88,18 +107,26 @@ func (a *RmmzEngine) ProcessSkills(
 		translatedData,
 		fileInfo.Mode().Perm(),
 	); err != nil {
-		return fmt.Errorf("write temporary Skills.json: %w", err)
+		return fmt.Errorf(
+			"write temporary Skills.json: %w",
+			err,
+		)
 	}
 
 	defer os.Remove(tempPath)
-
 	oldDir := filepath.Join(
 		filepath.Dir(skillsPath),
 		"old",
 	)
 
-	if err := os.MkdirAll(oldDir, 0755); err != nil {
-		return fmt.Errorf("create old directory: %w", err)
+	if err := os.MkdirAll(
+		oldDir,
+		0755,
+	); err != nil {
+		return fmt.Errorf(
+			"create old directory: %w",
+			err,
+		)
 	}
 
 	backupName := fmt.Sprintf(
@@ -116,7 +143,10 @@ func (a *RmmzEngine) ProcessSkills(
 		skillsPath,
 		backupPath,
 	); err != nil {
-		return fmt.Errorf("move original Skills.json: %w", err)
+		return fmt.Errorf(
+			"move original Skills.json: %w",
+			err,
+		)
 	}
 
 	if err := os.Rename(
@@ -136,11 +166,21 @@ func (a *RmmzEngine) ProcessSkills(
 			)
 		}
 
-		return fmt.Errorf("replace Skills.json: %w", err)
+		return fmt.Errorf(
+			"replace Skills.json: %w",
+			err,
+		)
 	}
 
-	fmt.Printf("Перевод сохранён: %s\n", skillsPath)
-	fmt.Printf("Оригинал сохранён: %s\n\n", backupPath)
+	fmt.Printf(
+		"Translation saved: %s\n",
+		skillsPath,
+	)
+
+	fmt.Printf(
+		"Original file backed up: %s\n\n",
+		backupPath,
+	)
 
 	return nil
 }
@@ -157,9 +197,21 @@ func findSkillsFile(
 	}
 
 	candidates := []string{
-		filepath.Join(rootDir, "data", "Skills.json"),
-		filepath.Join(rootDir, "www", "data", "Skills.json"),
-		filepath.Join(rootDir, "Skills.json"),
+		filepath.Join(
+			rootDir,
+			"data",
+			"Skills.json",
+		),
+		filepath.Join(
+			rootDir,
+			"www",
+			"data",
+			"Skills.json",
+		),
+		filepath.Join(
+			rootDir,
+			"Skills.json",
+		),
 	}
 
 	for _, candidate := range candidates {
@@ -192,7 +244,9 @@ func findSkillsFile(
 			}
 
 			if !strings.EqualFold(
-				filepath.Base(filepath.Dir(path)),
+				filepath.Base(
+					filepath.Dir(path),
+				),
 				"data",
 			) {
 				return nil
@@ -224,8 +278,14 @@ func applySkillTranslations(
 	texts []skills.SkillText,
 ) ([]byte, error) {
 	var records []map[string]any
-	if err := json.Unmarshal(sourceData, &records); err != nil {
-		return nil, fmt.Errorf("decode Skills.json: %w", err)
+	if err := json.Unmarshal(
+		sourceData,
+		&records,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"decode Skills.json: %w",
+			err,
+		)
 	}
 
 	for _, text := range texts {
@@ -253,7 +313,10 @@ func applySkillTranslations(
 	encoder.SetEscapeHTML(false)
 
 	if err := encoder.Encode(records); err != nil {
-		return nil, fmt.Errorf("encode Skills.json: %w", err)
+		return nil, fmt.Errorf(
+			"encode Skills.json: %w",
+			err,
+		)
 	}
 
 	return output.Bytes(), nil
