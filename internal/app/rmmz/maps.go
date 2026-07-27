@@ -54,8 +54,26 @@ func (a *RmmzEngine) ProcessMap(
 		len(texts),
 	)
 
-	cache := make(map[string]string)
-	for index := range texts {
+	for index := 0; index < len(texts); {
+		blockEnd := relatedTextBlockEnd(
+			texts,
+			index,
+		)
+
+		if blockEnd-index > 1 {
+			if err := a.translateMapTextBlock(
+				mapPath,
+				texts,
+				index,
+				blockEnd,
+			); err != nil {
+				return err
+			}
+
+			index = blockEnd
+			continue
+		}
+
 		text := &texts[index]
 		fmt.Printf(
 			"[%s %d/%d] event=%d page=%d command=%d field=%s text=%q\n",
@@ -69,32 +87,34 @@ func (a *RmmzEngine) ProcessMap(
 			text.Text,
 		)
 
-		translated, exists := cache[text.Text]
-		if !exists {
-			translated, err = a.ollamaClient.Translate(text.Text)
-			if err != nil {
-				return fmt.Errorf(
-					"translate %s event %d page %d command %d: %w",
-					filepath.Base(mapPath),
-					text.EventID,
-					text.PageIndex,
-					text.CommandIndex,
-					err,
-				)
-			}
-
-			if strings.TrimSpace(translated) == "" {
-				return fmt.Errorf(
-					"empty translation in %s event %d page %d command %d",
-					filepath.Base(mapPath),
-					text.EventID,
-					text.PageIndex,
-					text.CommandIndex,
-				)
-			}
-			cache[text.Text] = translated
+		translated, err := a.ollamaClient.Translate(
+			text.Text,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"translate %s event %d page %d command %d field %s: %w",
+				filepath.Base(mapPath),
+				text.EventID,
+				text.PageIndex,
+				text.CommandIndex,
+				text.Field,
+				err,
+			)
 		}
+
+		if strings.TrimSpace(translated) == "" {
+			return fmt.Errorf(
+				"empty translation in %s event %d page %d command %d field %s",
+				filepath.Base(mapPath),
+				text.EventID,
+				text.PageIndex,
+				text.CommandIndex,
+				text.Field,
+			)
+		}
+
 		text.Text = translated
+		index++
 	}
 
 	translatedData, err := applyMapTranslations(
@@ -128,8 +148,14 @@ func (a *RmmzEngine) ProcessMap(
 		"old",
 	)
 
-	if err := os.MkdirAll(oldDir, 0755); err != nil {
-		return fmt.Errorf("create old directory: %w", err)
+	if err := os.MkdirAll(
+		oldDir,
+		0755,
+	); err != nil {
+		return fmt.Errorf(
+			"create old directory: %w",
+			err,
+		)
 	}
 
 	extension := filepath.Ext(mapPath)
@@ -192,6 +218,169 @@ func (a *RmmzEngine) ProcessMap(
 	return nil
 }
 
+func (a *RmmzEngine) translateMapTextBlock(
+	mapPath string,
+	texts []rmmaps.MapText,
+	start int,
+	end int,
+) error {
+	lines := make([]string, end-start)
+	for index := start; index < end; index++ {
+		lines[index-start] = texts[index].Text
+	}
+
+	first := texts[start]
+	last := texts[end-1]
+
+	fmt.Printf(
+		"[%s %d-%d/%d] event=%d page=%d commands=%d-%d field=%s elements=%d\n",
+		filepath.Base(mapPath),
+		start+1,
+		end,
+		len(texts),
+		first.EventID,
+		first.PageIndex,
+		first.CommandIndex,
+		last.CommandIndex,
+		first.Field,
+		len(lines),
+	)
+
+	translatedLines, err := a.ollamaClient.TranslateLines(lines)
+	if err != nil {
+		return fmt.Errorf(
+			"translate %s block event %d page %d commands %d-%d field %s: %w",
+			filepath.Base(mapPath),
+			first.EventID,
+			first.PageIndex,
+			first.CommandIndex,
+			last.CommandIndex,
+			first.Field,
+			err,
+		)
+	}
+
+	if len(translatedLines) != len(lines) {
+		return fmt.Errorf(
+			"translation count mismatch in %s event %d page %d commands %d-%d: received %d, expected %d",
+			filepath.Base(mapPath),
+			first.EventID,
+			first.PageIndex,
+			first.CommandIndex,
+			last.CommandIndex,
+			len(translatedLines),
+			len(lines),
+		)
+	}
+
+	for index := start; index < end; index++ {
+		translation := strings.TrimSpace(
+			translatedLines[index-start],
+		)
+
+		if translation == "" {
+			return fmt.Errorf(
+				"empty block translation in %s event %d page %d command %d element %d",
+				filepath.Base(mapPath),
+				texts[index].EventID,
+				texts[index].PageIndex,
+				texts[index].CommandIndex,
+				index-start,
+			)
+		}
+		texts[index].Text = translation
+	}
+
+	return nil
+}
+
+func relatedTextBlockEnd(
+	texts []rmmaps.MapText,
+	start int,
+) int {
+	if start < 0 || start >= len(texts) {
+		return start
+	}
+
+	switch texts[start].Field {
+	case "message":
+		return sequentialCommandBlockEnd(
+			texts,
+			start,
+			"message",
+		)
+
+	case "scrollingText":
+		return sequentialCommandBlockEnd(
+			texts,
+			start,
+			"scrollingText",
+		)
+
+	case "choice":
+		return choiceBlockEnd(
+			texts,
+			start,
+		)
+
+	default:
+		return start + 1
+	}
+}
+
+func sequentialCommandBlockEnd(
+	texts []rmmaps.MapText,
+	start int,
+	field string,
+) int {
+	first := texts[start]
+	end := start + 1
+	for end < len(texts) {
+		previous := texts[end-1]
+		current := texts[end]
+		if current.Field != field {
+			break
+		}
+
+		if current.EventIndex != first.EventIndex ||
+			current.PageIndex != first.PageIndex {
+			break
+		}
+
+		if current.CommandIndex != previous.CommandIndex+1 {
+			break
+		}
+
+		end++
+	}
+
+	return end
+}
+
+func choiceBlockEnd(
+	texts []rmmaps.MapText,
+	start int,
+) int {
+	first := texts[start]
+	end := start + 1
+	for end < len(texts) {
+		current := texts[end]
+		if current.Field != "choice" {
+			break
+		}
+
+		if current.EventIndex != first.EventIndex ||
+			current.PageIndex != first.PageIndex ||
+			current.CommandIndex != first.CommandIndex ||
+			current.ParameterIndex != first.ParameterIndex {
+			break
+		}
+		end++
+	}
+
+	return end
+}
+
 func (a *RmmzEngine) FindMapFiles(
 	gameDir string,
 ) ([]string, error) {
@@ -247,7 +436,7 @@ func (a *RmmzEngine) FindMapFiles(
 
 			if entry.IsDir() {
 				switch entry.Name() {
-				case ".git", "node_modules", "old":
+				case ".git", "node_modules", "old", ".rmloc":
 					return filepath.SkipDir
 				}
 
@@ -265,7 +454,11 @@ func (a *RmmzEngine) FindMapFiles(
 				return nil
 			}
 
-			mapFiles = append(mapFiles, path)
+			mapFiles = append(
+				mapFiles,
+				path,
+			)
+
 			return nil
 		},
 	)
@@ -284,7 +477,11 @@ func (a *RmmzEngine) FindMapFiles(
 	}
 
 	sort.Strings(mapFiles)
-	fmt.Printf("Найдено карт: %d\n", len(mapFiles))
+	fmt.Printf(
+		"Найдено карт: %d\n",
+		len(mapFiles),
+	)
+
 	return mapFiles, nil
 }
 
@@ -293,8 +490,14 @@ func applyMapTranslations(
 	texts []rmmaps.MapText,
 ) ([]byte, error) {
 	var record map[string]any
-	if err := json.Unmarshal(sourceData, &record); err != nil {
-		return nil, fmt.Errorf("decode map JSON: %w", err)
+	if err := json.Unmarshal(
+		sourceData,
+		&record,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"decode map JSON: %w",
+			err,
+		)
 	}
 
 	for _, text := range texts {
@@ -317,7 +520,10 @@ func applyMapTranslations(
 	encoder.SetEscapeHTML(false)
 
 	if err := encoder.Encode(record); err != nil {
-		return nil, fmt.Errorf("encode map JSON: %w", err)
+		return nil, fmt.Errorf(
+			"encode map JSON: %w",
+			err,
+		)
 	}
 
 	return output.Bytes(), nil
@@ -329,7 +535,9 @@ func applyMapCommandTranslation(
 ) error {
 	events, ok := record["events"].([]any)
 	if !ok {
-		return fmt.Errorf("events is not an array")
+		return fmt.Errorf(
+			"events is not an array",
+		)
 	}
 
 	if text.EventIndex < 0 ||
@@ -480,13 +688,19 @@ func readMapFiles(
 
 		mapFiles = append(
 			mapFiles,
-			filepath.Join(dataDir, entry.Name()),
+			filepath.Join(
+				dataDir,
+				entry.Name(),
+			),
 		)
 	}
 
 	sort.Strings(mapFiles)
 	if len(mapFiles) > 0 {
-		fmt.Printf("Найдено карт: %d\n", len(mapFiles))
+		fmt.Printf(
+			"Найдено карт: %d\n",
+			len(mapFiles),
+		)
 	}
 
 	return mapFiles, nil

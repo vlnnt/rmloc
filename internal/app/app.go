@@ -1,10 +1,11 @@
 package app
 
 import (
-	"rmloc/internal/app/rmmz"
 	"runtime"
 
 	"golang.org/x/sync/errgroup"
+
+	"rmloc/internal/app/rmmz"
 )
 
 type App struct {
