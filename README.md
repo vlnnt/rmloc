@@ -6,22 +6,6 @@ The project is designed to support multiple game engines and AI providers in the
 
 Translation behavior is controlled through an external JSON prompt file. This allows users to translate between different languages without rebuilding the application.
 
-## Features
-
-* Translates RPG Maker MZ database files and maps.
-* Groups related dialogue lines to preserve context.
-* Supports custom translation directions through JSON prompt files.
-* Allows the Ollama API URL and model to be selected at runtime.
-* Protects RPG Maker control codes, placeholders, variables, and special symbols.
-* Stores completed translations in a persistent cache.
-* Reuses cached translations after restarting the application.
-* Retries failed translation requests.
-* Retries translations that damage protected markers.
-* Falls back to translating grouped dialogue lines individually when necessary.
-* Keeps problematic strings unchanged instead of stopping the entire process.
-* Creates backups before replacing game files.
-* Prints translation, cache, HTTP, token, and performance statistics.
-
 ## Requirements
 
 * Go
