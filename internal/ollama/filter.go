@@ -3,10 +3,10 @@ package ollama
 import (
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 var (
-	latinLetterPattern         = regexp.MustCompile(`[A-Za-z]`)
 	rpgMakerControlCodePattern = regexp.MustCompile(`\\[A-Za-z]+\[[^\]]*]`)
 	rpgMakerSimpleCodePattern  = regexp.MustCompile(`\\[.$|!><^{}]`)
 	htmlTagPattern             = regexp.MustCompile(`<[^>]*>`)
@@ -25,7 +25,11 @@ func needsTranslation(
 	text = rpgMakerSimpleCodePattern.ReplaceAllString(text, "")
 	text = htmlTagPattern.ReplaceAllString(text, "")
 	text = placeholderPattern.ReplaceAllString(text, "")
-	return latinLetterPattern.MatchString(text)
+
+	return strings.IndexFunc(
+		text,
+		unicode.IsLetter,
+	) >= 0
 }
 
 func needsAnyTranslation(

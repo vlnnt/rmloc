@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const translationCacheVersion = 1
+const translationCacheVersion = 2
 
 const (
 	cacheKindTranslation = "translation"
@@ -65,6 +65,9 @@ func (c *Client) EnablePersistentCache(
 		4*1024*1024,
 	)
 
+	loadedEntries := 0
+	loadedAliases := 0
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -72,15 +75,29 @@ func (c *Client) EnablePersistentCache(
 		}
 
 		var entry persistentCacheEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			continue
-		}
-
-		if entry.Version != translationCacheVersion {
+		if err := json.Unmarshal(
+			[]byte(line),
+			&entry,
+		); err != nil {
 			continue
 		}
 
 		if entry.Model != c.model {
+			continue
+		}
+
+		switch entry.Version {
+		case legacyTranslationCacheVersion:
+			if !c.allowLegacyCache {
+				continue
+			}
+
+		case translationCacheVersion:
+			if entry.PromptHash != c.promptHash {
+				continue
+			}
+
+		default:
 			continue
 		}
 
@@ -91,10 +108,15 @@ func (c *Client) EnablePersistentCache(
 				continue
 			}
 
-			c.translationCache.Store(
+			c.storeTranslationCacheEntry(
 				entry.Key,
 				entry.Translation,
 			)
+
+			loadedEntries++
+			if entry.Key != entry.Translation {
+				loadedAliases++
+			}
 
 		case cacheKindDialogue:
 			if entry.Key == "" ||
@@ -103,6 +125,7 @@ func (c *Client) EnablePersistentCache(
 			}
 
 			valid := true
+
 			for _, translation := range entry.Translations {
 				if strings.TrimSpace(translation) == "" {
 					valid = false
@@ -114,10 +137,15 @@ func (c *Client) EnablePersistentCache(
 				continue
 			}
 
-			c.dialogueCache.Store(
+			translatedKey := c.storeDialogueCacheEntry(
 				entry.Key,
-				copyStrings(entry.Translations),
+				entry.Translations,
 			)
+
+			loadedEntries++
+			if translatedKey != entry.Key {
+				loadedAliases++
+			}
 		}
 	}
 
@@ -127,6 +155,12 @@ func (c *Client) EnablePersistentCache(
 			err,
 		)
 	}
+
+	fmt.Printf(
+		"Loaded cache entries: %d; translated-text aliases: %d\n",
+		loadedEntries,
+		loadedAliases,
+	)
 
 	return nil
 }
@@ -139,6 +173,7 @@ func (c *Client) persistTranslation(
 		persistentCacheEntry{
 			Version:     translationCacheVersion,
 			Model:       c.model,
+			PromptHash:  c.promptHash,
 			Kind:        cacheKindTranslation,
 			Key:         key,
 			Translation: translation,
@@ -154,6 +189,7 @@ func (c *Client) persistDialogue(
 		persistentCacheEntry{
 			Version:      translationCacheVersion,
 			Model:        c.model,
+			PromptHash:   c.promptHash,
 			Kind:         cacheKindDialogue,
 			Key:          key,
 			Translations: copyStrings(translations),
@@ -166,6 +202,7 @@ func (c *Client) appendPersistentCacheEntry(
 ) error {
 	c.cacheFileMu.Lock()
 	defer c.cacheFileMu.Unlock()
+
 	if c.cachePath == "" {
 		return nil
 	}
@@ -202,4 +239,52 @@ func (c *Client) appendPersistentCacheEntry(
 	}
 
 	return nil
+}
+
+func (c *Client) storeTranslationCacheEntry(
+	key string,
+	translation string,
+) {
+	c.translationCache.Store(
+		key,
+		translation,
+	)
+
+	c.translationCache.Store(
+		translation,
+		translation,
+	)
+}
+
+func (c *Client) storeDialogueCacheEntry(
+	key string,
+	translations []string,
+) string {
+	c.dialogueCache.Store(
+		key,
+		copyStrings(translations),
+	)
+
+	translatedKey := dialogueCacheKey(
+		translations,
+	)
+
+	c.dialogueCache.Store(
+		translatedKey,
+		copyStrings(translations),
+	)
+
+	return translatedKey
+}
+
+func dialogueCacheKey(
+	lines []string,
+) string {
+	body, _ := json.Marshal(
+		translationLinesRequest{
+			Lines: lines,
+		},
+	)
+
+	return string(body)
 }

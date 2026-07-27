@@ -24,17 +24,39 @@ type translationValidationError struct {
 }
 
 func NewClient(
-	baseURL, model string,
-) *Client {
+	baseURL string,
+	model string,
+	prompts PromptConfig,
+) (*Client, error) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return nil, fmt.Errorf("Ollama base URL is empty")
+	}
+
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil, fmt.Errorf("Ollama model is empty")
+	}
+
+	if err := prompts.validate(); err != nil {
+		return nil, fmt.Errorf("validate prompts: %w", err)
+	}
+
+	promptHash := prompts.Fingerprint()
+
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		model:   model,
+		baseURL:                   baseURL,
+		model:                     model,
+		singleTranslationPrompt:   strings.TrimSpace(prompts.SingleTranslation),
+		dialogueTranslationPrompt: strings.TrimSpace(prompts.DialogueTranslation),
+		promptHash:                promptHash,
+		allowLegacyCache:          promptHash == legacyDefaultPromptHash,
 		httpClient: &fasthttp.Client{
 			ReadTimeout:  5 * time.Minute,
 			WriteTimeout: 10 * time.Second,
 		},
 		timeout: 5 * time.Minute,
-	}
+	}, nil
 }
 
 func (c *Client) Translate(
@@ -97,7 +119,7 @@ func (c *Client) translate(
 					return nil, err
 				}
 
-				c.translationCache.Store(
+				c.storeTranslationCacheEntry(
 					text,
 					text,
 				)
@@ -124,7 +146,7 @@ func (c *Client) translate(
 				)
 			}
 
-			c.translationCache.Store(
+			c.storeTranslationCacheEntry(
 				text,
 				restoredTranslation,
 			)
@@ -243,9 +265,9 @@ func (c *Client) TranslateLines(
 					fallbackTranslations[index] = translation
 				}
 
-				c.dialogueCache.Store(
+				c.storeDialogueCacheEntry(
 					cacheKey,
-					copyStrings(fallbackTranslations),
+					fallbackTranslations,
 				)
 
 				return copyStrings(fallbackTranslations), nil
@@ -261,9 +283,9 @@ func (c *Client) TranslateLines(
 				)
 			}
 
-			c.dialogueCache.Store(
+			c.storeDialogueCacheEntry(
 				cacheKey,
-				copyStrings(restoredTranslations),
+				restoredTranslations,
 			)
 
 			c.recordModelTranslatedTexts(len(lines))
@@ -289,10 +311,10 @@ func (c *Client) translateProtectedText(
 ) (string, error) {
 	var lastValidationErr error
 	for attempt := 1; attempt <= maxTranslationValidationAttempts; attempt++ {
-		prompt := systemPrompt
+		prompt := c.singleTranslationPrompt
 		if attempt > 1 {
 			prompt = validationRetryPrompt(
-				systemPrompt,
+				c.singleTranslationPrompt,
 				lastValidationErr,
 				false,
 			)
@@ -349,11 +371,10 @@ func (c *Client) translateProtectedLines(
 
 	var lastValidationErr error
 	for attempt := 1; attempt <= maxTranslationValidationAttempts; attempt++ {
-		prompt := dialogueLinesPrompt
-
+		prompt := c.dialogueTranslationPrompt
 		if attempt > 1 {
 			prompt = validationRetryPrompt(
-				dialogueLinesPrompt,
+				c.dialogueTranslationPrompt,
 				lastValidationErr,
 				true,
 			)
@@ -397,6 +418,7 @@ func validateTranslation(
 	protected protectedText,
 ) (string, error) {
 	translation = strings.TrimSpace(translation)
+
 	if translation == "" {
 		return "", fmt.Errorf(
 			"Ollama returned empty translation",
@@ -524,9 +546,11 @@ func truncateForLog(
 }
 
 func (c *Client) chat(
-	system, user string,
+	system string,
+	user string,
 	format json.RawMessage,
-	numPredict, numCtx int,
+	numPredict int,
+	numCtx int,
 	result any,
 ) error {
 	body, err := json.Marshal(

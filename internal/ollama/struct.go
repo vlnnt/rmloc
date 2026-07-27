@@ -10,16 +10,20 @@ import (
 )
 
 type Client struct {
-	baseURL          string
-	model            string
-	httpClient       *fasthttp.Client
-	timeout          time.Duration
-	translationCache sync.Map
-	dialogueCache    sync.Map
-	requestGroup     singleflight.Group
-	cachePath        string
-	cacheFileMu      sync.Mutex
-	metrics          clientMetrics
+	baseURL                   string
+	model                     string
+	singleTranslationPrompt   string
+	dialogueTranslationPrompt string
+	promptHash                string
+	allowLegacyCache          bool
+	httpClient                *fasthttp.Client
+	timeout                   time.Duration
+	translationCache          sync.Map
+	dialogueCache             sync.Map
+	requestGroup              singleflight.Group
+	cachePath                 string
+	cacheFileMu               sync.Mutex
+	metrics                   clientMetrics
 }
 
 type message struct {
@@ -69,6 +73,7 @@ type translationLinesResponse struct {
 type persistentCacheEntry struct {
 	Version      int      `json:"version"`
 	Model        string   `json:"model"`
+	PromptHash   string   `json:"prompt_hash,omitempty"`
 	Kind         string   `json:"kind"`
 	Key          string   `json:"key"`
 	Translation  string   `json:"translation,omitempty"`
