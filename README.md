@@ -1,6 +1,6 @@
 # rmloc
 
-`rmloc` is a command-line tool for translating game files with local AI models.
+`rmloc` is a command-line tool for translating game files with AI.
 
 The project is designed to support multiple game engines and AI providers in the future. Currently, it supports RPG Maker MZ and uses an Ollama-compatible API for translation.
 
