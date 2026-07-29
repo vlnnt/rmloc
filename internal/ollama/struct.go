@@ -13,8 +13,12 @@ type Client struct {
 	baseURL                   string
 	model                     string
 	singleTranslationPrompt   string
+	batchTranslationPrompt    string
 	dialogueTranslationPrompt string
-	promptHash                string
+	legacyPromptHash          string
+	singlePromptHash          string
+	batchPromptHash           string
+	dialoguePromptHash        string
 	allowLegacyCache          bool
 	httpClient                *fasthttp.Client
 	timeout                   time.Duration
@@ -73,6 +77,7 @@ type translationLinesResponse struct {
 type persistentCacheEntry struct {
 	Version      int      `json:"version"`
 	Model        string   `json:"model"`
+	PromptMode   string   `json:"prompt_mode,omitempty"`
 	PromptHash   string   `json:"prompt_hash,omitempty"`
 	Kind         string   `json:"kind"`
 	Key          string   `json:"key"`

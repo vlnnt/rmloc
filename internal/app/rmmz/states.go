@@ -2,7 +2,9 @@ package rmmz
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -16,64 +18,145 @@ import (
 func (a *RmmzEngine) ProcessStates(
 	gameDir string,
 ) error {
+	return a.ProcessStatesContext(
+		context.Background(),
+		gameDir,
+	)
+}
+
+func (a *RmmzEngine) ProcessStatesContext(
+	ctx context.Context,
+	gameDir string,
+) (resultErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	statesPath, err := findStatesFile(gameDir)
 	if err != nil {
 		return err
 	}
 
-	sourceData, err := os.ReadFile(statesPath)
-	if err != nil {
-		return fmt.Errorf("read States.json: %w", err)
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
-	fileInfo, err := os.Stat(statesPath)
+	sourceData, err := os.ReadFile(
+		statesPath,
+	)
 	if err != nil {
-		return fmt.Errorf("stat States.json: %w", err)
-	}
-
-	texts, err := states.Extract(statesPath)
-	if err != nil {
-		return fmt.Errorf("extract States.json: %w", err)
-	}
-
-	fmt.Printf("Found file: %s\n", statesPath)
-	fmt.Printf("Found text entries: %d\n", len(texts))
-
-	cache := make(map[string]string)
-	for index := range texts {
-		text := &texts[index]
-
-		fmt.Printf(
-			"[%d/%d] state=%d field=%s text=%q\n",
-			index+1,
-			len(texts),
-			text.StateID,
-			text.Field,
-			text.Text,
+		return fmt.Errorf(
+			"read States.json: %w",
+			err,
 		)
+	}
 
-		translated, exists := cache[text.Text]
-		if !exists {
-			translated, err = a.ollamaClient.Translate(text.Text)
-			if err != nil {
-				return fmt.Errorf(
-					"translate state %d field %s: %w",
-					text.StateID,
-					text.Field,
-					err,
-				)
-			}
+	fileInfo, err := os.Stat(
+		statesPath,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"stat States.json: %w",
+			err,
+		)
+	}
 
-			if strings.TrimSpace(translated) == "" {
-				return fmt.Errorf(
-					"empty translation for state %d field %s",
-					text.StateID,
-					text.Field,
-				)
-			}
-			cache[text.Text] = translated
+	texts, err := states.Extract(
+		statesPath,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"extract States.json: %w",
+			err,
+		)
+	}
+
+	reporter := a.Reporter()
+	reporter.FileDiscovered(
+		statesPath,
+		len(texts),
+	)
+
+	reporter.FileStarted(
+		statesPath,
+	)
+
+	defer func() {
+		switch {
+		case resultErr == nil:
+			reporter.FileCompleted(
+				statesPath,
+			)
+
+		case errors.Is(
+			resultErr,
+			context.Canceled,
+		) ||
+			errors.Is(
+				resultErr,
+				context.DeadlineExceeded,
+			):
+			reporter.FileCanceled(
+				statesPath,
+			)
+
+		default:
+			reporter.FileFailed(
+				statesPath,
+				resultErr,
+			)
 		}
-		text.Text = translated
+	}()
+
+	fmt.Printf(
+		"Found file: %s\n",
+		statesPath,
+	)
+
+	fmt.Printf(
+		"Found text entries: %d\n",
+		len(texts),
+	)
+
+	if err := translateTextEntries(
+		ctx,
+		a.ollamaClient,
+		reporter,
+		statesPath,
+		texts,
+		func(
+			text *states.StateText,
+		) string {
+			return text.Text
+		},
+		func(
+			text *states.StateText,
+			translation string,
+		) {
+			text.Text = translation
+		},
+		func(
+			text *states.StateText,
+		) string {
+			return fmt.Sprintf(
+				"state=%d field=%s",
+				text.StateID,
+				text.Field,
+			)
+		},
+	); err != nil {
+		return fmt.Errorf(
+			"translate States.json: %w",
+			err,
+		)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	translatedData, err := applyStateTranslations(
@@ -81,6 +164,10 @@ func (a *RmmzEngine) ProcessStates(
 		texts,
 	)
 	if err != nil {
+		return err
+	}
+
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
@@ -96,15 +183,24 @@ func (a *RmmzEngine) ProcessStates(
 		)
 	}
 
-	defer os.Remove(tempPath)
+	defer os.Remove(
+		tempPath,
+	)
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	oldDir := filepath.Join(
-		filepath.Dir(statesPath),
+		filepath.Dir(
+			statesPath,
+		),
 		"old",
 	)
 
 	if err := os.MkdirAll(
 		oldDir,
-		0755,
+		0o755,
 	); err != nil {
 		return fmt.Errorf(
 			"create old directory: %w",
@@ -114,13 +210,19 @@ func (a *RmmzEngine) ProcessStates(
 
 	backupName := fmt.Sprintf(
 		"States_%s.json",
-		time.Now().Format("20060102_150405"),
+		time.Now().Format(
+			"20060102_150405",
+		),
 	)
 
 	backupPath := filepath.Join(
 		oldDir,
 		backupName,
 	)
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	if err := os.Rename(
 		statesPath,
@@ -171,11 +273,30 @@ func (a *RmmzEngine) ProcessStates(
 func findStatesFile(
 	gameDir string,
 ) (string, error) {
-	rootDir, err := filepath.Abs(gameDir)
+	rootDir, err := filepath.Abs(
+		gameDir,
+	)
 	if err != nil {
 		return "", fmt.Errorf(
 			"resolve game directory: %w",
 			err,
+		)
+	}
+
+	info, err := os.Stat(
+		rootDir,
+	)
+	if err != nil {
+		return "", fmt.Errorf(
+			"open game directory: %w",
+			err,
+		)
+	}
+
+	if !info.IsDir() {
+		return "", fmt.Errorf(
+			"game path is not a directory: %s",
+			rootDir,
 		)
 	}
 
@@ -198,7 +319,9 @@ func findStatesFile(
 	}
 
 	for _, candidate := range candidates {
-		if isFile(candidate) {
+		if isFile(
+			candidate,
+		) {
 			return candidate, nil
 		}
 	}
@@ -207,7 +330,9 @@ func findStatesFile(
 	err = filepath.WalkDir(
 		rootDir,
 		func(
-			path string, entry fs.DirEntry, walkErr error,
+			path string,
+			entry fs.DirEntry,
+			walkErr error,
 		) error {
 			if walkErr != nil {
 				return walkErr
@@ -215,7 +340,10 @@ func findStatesFile(
 
 			if entry.IsDir() {
 				switch entry.Name() {
-				case ".git", "node_modules", "old":
+				case ".git",
+					"node_modules",
+					"old",
+					".rmloc":
 					return filepath.SkipDir
 				}
 
@@ -228,7 +356,9 @@ func findStatesFile(
 
 			if !strings.EqualFold(
 				filepath.Base(
-					filepath.Dir(path),
+					filepath.Dir(
+						path,
+					),
 				),
 				"data",
 			) {
@@ -287,15 +417,27 @@ func applyStateTranslations(
 				text.StateIndex,
 			)
 		}
+
 		record[text.Field] = text.Text
 	}
 
 	var output bytes.Buffer
-	encoder := json.NewEncoder(&output)
-	encoder.SetIndent("", "  ")
-	encoder.SetEscapeHTML(false)
+	encoder := json.NewEncoder(
+		&output,
+	)
 
-	if err := encoder.Encode(records); err != nil {
+	encoder.SetIndent(
+		"",
+		"  ",
+	)
+
+	encoder.SetEscapeHTML(
+		false,
+	)
+
+	if err := encoder.Encode(
+		records,
+	); err != nil {
 		return nil, fmt.Errorf(
 			"encode States.json: %w",
 			err,

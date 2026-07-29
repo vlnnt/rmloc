@@ -2,12 +2,13 @@ package rmmz
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"rmloc/internal/engine/rmmz/actors"
@@ -16,64 +17,139 @@ import (
 func (a *RmmzEngine) ProcessActors(
 	gameDir string,
 ) error {
+	return a.ProcessActorsContext(
+		context.Background(),
+		gameDir,
+	)
+}
+
+func (a *RmmzEngine) ProcessActorsContext(
+	ctx context.Context,
+	gameDir string,
+) (resultErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	actorsPath, err := findActorsFile(gameDir)
 	if err != nil {
 		return err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	sourceData, err := os.ReadFile(actorsPath)
 	if err != nil {
-		return fmt.Errorf("read Actors.json: %w", err)
+		return fmt.Errorf(
+			"read Actors.json: %w",
+			err,
+		)
 	}
 
 	fileInfo, err := os.Stat(actorsPath)
 	if err != nil {
-		return fmt.Errorf("stat Actors.json: %w", err)
+		return fmt.Errorf(
+			"stat Actors.json: %w",
+			err,
+		)
 	}
 
 	texts, err := actors.Extract(actorsPath)
 	if err != nil {
-		return fmt.Errorf("extract Actors.json: %w", err)
+		return fmt.Errorf(
+			"extract Actors.json: %w",
+			err,
+		)
 	}
 
-	fmt.Printf("Found file: %s\n", actorsPath)
-	fmt.Printf("Found text entries: %d\n", len(texts))
+	reporter := a.Reporter()
+	reporter.FileDiscovered(
+		actorsPath,
+		len(texts),
+	)
 
-	cache := make(map[string]string)
-	for index := range texts {
-		text := &texts[index]
-		fmt.Printf(
-			"[%d/%d] actor=%d field=%s text=%q\n",
-			index+1,
-			len(texts),
-			text.ActorID,
-			text.Field,
-			text.Text,
-		)
+	reporter.FileStarted(
+		actorsPath,
+	)
 
-		translated, exists := cache[text.Text]
-		if !exists {
-			translated, err = a.ollamaClient.Translate(text.Text)
-			if err != nil {
-				return fmt.Errorf(
-					"translate actor %d field %s: %w",
-					text.ActorID,
-					text.Field,
-					err,
-				)
-			}
+	defer func() {
+		switch {
+		case resultErr == nil:
+			reporter.FileCompleted(
+				actorsPath,
+			)
 
-			if strings.TrimSpace(translated) == "" {
-				return fmt.Errorf(
-					"empty translation for actor %d field %s",
-					text.ActorID,
-					text.Field,
-				)
-			}
+		case errors.Is(
+			resultErr,
+			context.Canceled,
+		) ||
+			errors.Is(
+				resultErr,
+				context.DeadlineExceeded,
+			):
+			reporter.FileCanceled(
+				actorsPath,
+			)
 
-			cache[text.Text] = translated
+		default:
+			reporter.FileFailed(
+				actorsPath,
+				resultErr,
+			)
 		}
-		text.Text = translated
+	}()
+
+	fmt.Printf(
+		"Found file: %s\n",
+		actorsPath,
+	)
+
+	fmt.Printf(
+		"Found text entries: %d\n",
+		len(texts),
+	)
+
+	if err := translateTextEntries(
+		ctx,
+		a.ollamaClient,
+		reporter,
+		actorsPath,
+		texts,
+		func(
+			text *actors.ActorText,
+		) string {
+			return text.Text
+		},
+		func(
+			text *actors.ActorText,
+			translation string,
+		) {
+			text.Text = translation
+		},
+		func(
+			text *actors.ActorText,
+		) string {
+			return fmt.Sprintf(
+				"actor=%d field=%s",
+				text.ActorID,
+				text.Field,
+			)
+		},
+	); err != nil {
+		return fmt.Errorf(
+			"translate Actors.json: %w",
+			err,
+		)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	translatedData, err := applyActorTranslations(
@@ -81,6 +157,10 @@ func (a *RmmzEngine) ProcessActors(
 		texts,
 	)
 	if err != nil {
+		return err
+	}
+
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
@@ -96,7 +176,14 @@ func (a *RmmzEngine) ProcessActors(
 		)
 	}
 
-	defer os.Remove(tempPath)
+	defer os.Remove(
+		tempPath,
+	)
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	oldDir := filepath.Join(
 		filepath.Dir(actorsPath),
 		"old",
@@ -104,7 +191,7 @@ func (a *RmmzEngine) ProcessActors(
 
 	if err := os.MkdirAll(
 		oldDir,
-		0755,
+		0o755,
 	); err != nil {
 		return fmt.Errorf(
 			"create old directory: %w",
@@ -114,13 +201,19 @@ func (a *RmmzEngine) ProcessActors(
 
 	backupName := fmt.Sprintf(
 		"Actors_%s.json",
-		time.Now().Format("20060102_150405"),
+		time.Now().Format(
+			"20060102_150405",
+		),
 	)
 
 	backupPath := filepath.Join(
 		oldDir,
 		backupName,
 	)
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	if err := os.Rename(
 		actorsPath,
@@ -222,7 +315,9 @@ func findActorsFile(
 	err = filepath.WalkDir(
 		rootDir,
 		func(
-			path string, entry fs.DirEntry, walkErr error,
+			path string,
+			entry fs.DirEntry,
+			walkErr error,
 		) error {
 			if walkErr != nil {
 				return walkErr
@@ -230,7 +325,10 @@ func findActorsFile(
 
 			if entry.IsDir() {
 				switch entry.Name() {
-				case ".git", "node_modules", "old":
+				case ".git",
+					"node_modules",
+					"old",
+					".rmloc":
 					return filepath.SkipDir
 				}
 
@@ -300,12 +398,20 @@ func applyActorTranslations(
 				text.ActorIndex,
 			)
 		}
+
 		record[text.Field] = text.Text
 	}
 
 	var output bytes.Buffer
-	encoder := json.NewEncoder(&output)
-	encoder.SetIndent("", "  ")
+	encoder := json.NewEncoder(
+		&output,
+	)
+
+	encoder.SetIndent(
+		"",
+		"  ",
+	)
+
 	encoder.SetEscapeHTML(false)
 
 	if err := encoder.Encode(records); err != nil {
@@ -322,5 +428,6 @@ func isFile(
 	path string,
 ) bool {
 	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
+	return err == nil &&
+		!info.IsDir()
 }
