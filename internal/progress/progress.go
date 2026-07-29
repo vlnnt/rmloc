@@ -19,10 +19,10 @@ type FileInfo struct {
 }
 
 type Reporter interface {
-	FileDiscovered(path string, total int)
-	FileStarted(path string)
-	FileAdvanced(path string, count int)
-	FileCompleted(path string)
-	FileFailed(path string, err error)
-	FileCanceled(path string)
+	FileDiscovered(string, int)
+	FileStarted(string)
+	FileAdvanced(string, int)
+	FileCompleted(string)
+	FileFailed(string, error)
+	FileCanceled(string)
 }

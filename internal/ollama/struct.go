@@ -84,3 +84,18 @@ type persistentCacheEntry struct {
 	Translation  string   `json:"translation,omitempty"`
 	Translations []string `json:"translations,omitempty"`
 }
+
+type translationValidationError struct {
+	attempts int
+	err      error
+}
+
+type structuredResponseError struct {
+	content string
+	err     error
+}
+
+type batchTextEntry struct {
+	text    string
+	indexes []int
+}

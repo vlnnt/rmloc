@@ -27,21 +27,6 @@ const (
 	translationValidationRetryDelay  = 500 * time.Millisecond
 )
 
-type translationValidationError struct {
-	attempts int
-	err      error
-}
-
-type structuredResponseError struct {
-	content string
-	err     error
-}
-
-type batchTextEntry struct {
-	text    string
-	indexes []int
-}
-
 func NewClient(
 	baseURL string,
 	model string,
@@ -72,7 +57,6 @@ func NewClient(
 	}
 
 	legacyPromptHash := prompts.LegacyFingerprint()
-
 	return &Client{
 		baseURL: baseURL,
 		model:   model,
@@ -157,12 +141,10 @@ func (c *Client) translate(
 		}
 
 		c.recordCacheHit(1)
-
 		return translation, nil
 	}
 
 	requestKey := "translation:" + text
-
 	value, err, _ := c.doSingleflightContext(
 		ctx,
 		requestKey,
@@ -180,12 +162,10 @@ func (c *Client) translate(
 				}
 
 				c.recordCacheHit(1)
-
 				return translation, nil
 			}
 
 			protected := protectText(text)
-
 			restoredTranslation, err := c.translateProtectedText(
 				ctx,
 				protected,
@@ -211,7 +191,6 @@ func (c *Client) translate(
 				)
 
 				c.recordSafetyFallback(1)
-
 				fmt.Printf(
 					"Warning: the text could not be translated safely; "+
 						"the original text was left unchanged. "+
@@ -246,7 +225,6 @@ func (c *Client) translate(
 			)
 
 			c.recordModelTranslatedTexts(1)
-
 			return restoredTranslation, nil
 		},
 	)
@@ -294,7 +272,6 @@ func (c *Client) TranslateBatchContext(
 	}
 
 	result := copyStrings(texts)
-
 	entries := make(
 		[]batchTextEntry,
 		0,
@@ -331,7 +308,6 @@ func (c *Client) TranslateBatchContext(
 
 			result[index] = translation
 			c.recordCacheHit(1)
-
 			continue
 		}
 
@@ -345,7 +321,6 @@ func (c *Client) TranslateBatchContext(
 		}
 
 		entryByText[text] = len(entries)
-
 		entries = append(
 			entries,
 			batchTextEntry{
@@ -392,7 +367,6 @@ func (c *Client) TranslateBatchContext(
 		}
 
 		translation := translations[entryIndex]
-
 		for _, resultIndex := range entry.indexes {
 			result[resultIndex] = translation
 		}
@@ -583,7 +557,6 @@ func (c *Client) translateBatchChunk(
 			)
 
 			middle := len(pendingTexts) / 2
-
 			leftTranslations, leftErr := c.translateBatchChunk(
 				ctx,
 				pendingTexts[:middle],
@@ -745,7 +718,6 @@ func (c *Client) TranslateLinesContext(
 	}
 
 	requestKey := "dialogue:" + cacheKey
-
 	value, err, _ := c.doSingleflightContext(
 		ctx,
 		requestKey,
@@ -888,14 +860,12 @@ func (c *Client) translateProtectedText(
 	protected protectedText,
 ) (string, error) {
 	var lastValidationErr error
-
 	for attempt := 1; attempt <= maxTranslationValidationAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
 
 		prompt := c.singleTranslationPrompt
-
 		if attempt > 1 {
 			prompt = validationRetryPrompt(
 				c.singleTranslationPrompt,
@@ -905,7 +875,6 @@ func (c *Client) translateProtectedText(
 		}
 
 		var result translationResponse
-
 		if err := c.chat(
 			ctx,
 			prompt,
@@ -934,7 +903,6 @@ func (c *Client) translateProtectedText(
 		}
 
 		lastValidationErr = validationErr
-
 		if attempt < maxTranslationValidationAttempts {
 			c.recordRetryAttempt()
 
@@ -1007,14 +975,12 @@ func (c *Client) translateProtectedMultiple(
 	}
 
 	var lastValidationErr error
-
 	for attempt := 1; attempt <= maxTranslationValidationAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
 		prompt := basePrompt
-
 		if attempt > 1 {
 			prompt = validationRetryPrompt(
 				basePrompt,
@@ -1024,7 +990,6 @@ func (c *Client) translateProtectedMultiple(
 		}
 
 		var result translationLinesResponse
-
 		if err := c.chat(
 			ctx,
 			prompt,
@@ -1053,7 +1018,6 @@ func (c *Client) translateProtectedMultiple(
 		}
 
 		lastValidationErr = validationErr
-
 		if attempt < maxTranslationValidationAttempts {
 			c.recordRetryAttempt()
 
@@ -1202,7 +1166,6 @@ func truncateForLog(
 	}
 
 	runes := []rune(text)
-
 	if len(runes) <= maxRunes {
 		return text
 	}
@@ -1214,15 +1177,12 @@ func truncateForLog(
 
 func (c *Client) chat(
 	ctx context.Context,
-	system string,
-	user string,
+	system, user string,
 	format json.RawMessage,
-	numPredict int,
-	numCtx int,
+	numPredict, numCtx int,
 	result any,
 ) error {
 	ctx = normalizeContext(ctx)
-
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1282,7 +1242,6 @@ func (c *Client) executeChatRequest(
 	}
 
 	c.recordHTTPAttempt()
-
 	startedAt := time.Now()
 
 	request := fasthttp.AcquireRequest()
@@ -1309,7 +1268,6 @@ func (c *Client) executeChatRequest(
 	)
 
 	request.SetBody(body)
-
 	requestErr := c.httpClient.DoTimeout(
 		request,
 		response,
@@ -1364,7 +1322,6 @@ func (c *Client) executeChatRequest(
 	}
 
 	var chatResult chatResponse
-
 	if err := json.Unmarshal(
 		response.Body(),
 		&chatResult,
@@ -1445,7 +1402,6 @@ func (c *Client) doSingleflightContext(
 	bool,
 ) {
 	ctx = normalizeContext(ctx)
-
 	resultChannel := c.requestGroup.DoChan(
 		key,
 		operation,
@@ -1486,7 +1442,6 @@ func isStructuredResponseError(
 	err error,
 ) bool {
 	var target *structuredResponseError
-
 	return errors.As(
 		err,
 		&target,

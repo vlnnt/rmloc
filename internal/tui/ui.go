@@ -24,7 +24,7 @@ const (
 	exitPageName     = "exit"
 
 	defaultOllamaURL = "http://localhost:11434"
-	defaultModel     = "qwen3:4b"
+	defaultModel     = "qwen2.5:1.5b"
 	defaultWorkers   = 2
 
 	uiRefreshInterval = 150 * time.Millisecond
@@ -85,7 +85,7 @@ func NewUI() *UI {
 		state:       NewState(),
 		currentPage: settingsPageName,
 
-		message:      "Готово к запуску перевода.",
+		message:      "Ready to start translation.",
 		messageColor: "green",
 
 		closed: make(chan struct{}),
@@ -163,15 +163,15 @@ func (u *UI) buildSettingsPage() {
 		SetTextAlign(tview.AlignCenter)
 
 	title.SetText(
-		"[yellow::b]RMLOC — перевод RPG Maker MZ[-:-:-]\n" +
-			"Укажите параметры перевода и нажмите «Старт».",
+		"[yellow::b]RMLOC — RPG Maker MZ Translator[-:-:-]\n" +
+			"Enter the translation settings and press Start.",
 	)
 
 	title.SetBorder(true)
 	title.SetTitle(" RMLOC ")
 
 	u.gameDirInput = tview.NewInputField().
-		SetLabel("Папка игры: ").
+		SetLabel("Game folder: ").
 		SetText(currentDirectory).
 		SetFieldWidth(0)
 
@@ -181,17 +181,17 @@ func (u *UI) buildSettingsPage() {
 		SetFieldWidth(0)
 
 	u.modelInput = tview.NewInputField().
-		SetLabel("Модель:     ").
+		SetLabel("Model:       ").
 		SetText(defaultModel).
 		SetFieldWidth(0)
 
 	u.promptInput = tview.NewInputField().
-		SetLabel("Промпт:     ").
+		SetLabel("Prompt:      ").
 		SetText(defaultPromptPath).
 		SetFieldWidth(0)
 
 	u.workersInput = tview.NewInputField().
-		SetLabel("Потоки:     ").
+		SetLabel("Workers:     ").
 		SetText(strconv.Itoa(defaultWorkers)).
 		SetFieldWidth(8)
 
@@ -203,12 +203,12 @@ func (u *UI) buildSettingsPage() {
 	u.settingsForm.AddFormItem(u.workersInput)
 
 	u.settingsForm.AddButton(
-		"Старт [F5]",
+		"Start [F5]",
 		u.startFromSettings,
 	)
 
 	u.settingsForm.AddButton(
-		"Выход [Q]",
+		"Exit [Q]",
 		u.requestExit,
 	)
 
@@ -217,7 +217,7 @@ func (u *UI) buildSettingsPage() {
 	)
 
 	u.settingsForm.SetBorder(true)
-	u.settingsForm.SetTitle(" Настройки ")
+	u.settingsForm.SetTitle(" Settings ")
 
 	u.settingsForm.SetCancelFunc(
 		u.requestExit,
@@ -228,10 +228,10 @@ func (u *UI) buildSettingsPage() {
 		SetTextAlign(tview.AlignCenter)
 
 	u.settingsStatus.SetBorder(true)
-	u.settingsStatus.SetTitle(" Состояние ")
+	u.settingsStatus.SetTitle(" Status ")
 
 	u.setSettingsMessage(
-		"Параметры будут проверены после нажатия «Старт».",
+		"Settings will be validated after you press Start.",
 		"green",
 	)
 
@@ -240,8 +240,8 @@ func (u *UI) buildSettingsPage() {
 		SetTextAlign(tview.AlignCenter)
 
 	help.SetText(
-		"[gray]Tab / Shift+Tab — переход между полями   " +
-			"F5 — старт   Q — выход[-]",
+		"[gray]Tab / Shift+Tab — switch between fields   " +
+			"F5 — start   Q — exit[-]",
 	)
 
 	u.settingsRoot = tview.NewFlex().
@@ -255,18 +255,18 @@ func (u *UI) buildSettingsPage() {
 func (u *UI) buildProgressPage() {
 	u.header = tview.NewTextView()
 	u.header.SetBorder(true)
-	u.header.SetTitle(" Конфигурация ")
+	u.header.SetTitle(" Configuration ")
 	u.header.SetWrap(false)
 
 	u.summary = tview.NewTextView()
 	u.summary.SetBorder(true)
-	u.summary.SetTitle(" Общий прогресс ")
+	u.summary.SetTitle(" Overall progress ")
 	u.summary.SetDynamicColors(true)
 	u.summary.SetTextAlign(tview.AlignCenter)
 
 	u.fileTable = tview.NewTable()
 	u.fileTable.SetBorder(true)
-	u.fileTable.SetTitle(" Файлы перевода ")
+	u.fileTable.SetTitle(" Translation files ")
 	u.fileTable.SetFixed(1, 0)
 	u.fileTable.SetSelectable(true, false)
 	u.fileTable.SetEvaluateAllRows(true)
@@ -279,32 +279,32 @@ func (u *UI) buildProgressPage() {
 
 	u.status = tview.NewTextView()
 	u.status.SetBorder(true)
-	u.status.SetTitle(" Состояние ")
+	u.status.SetTitle(" Status ")
 	u.status.SetDynamicColors(true)
 	u.status.SetTextAlign(tview.AlignCenter)
 
 	u.buttons = tview.NewForm()
 	u.buttons.SetBorder(true)
-	u.buttons.SetTitle(" Управление ")
+	u.buttons.SetTitle(" Controls ")
 	u.buttons.SetButtonsAlign(tview.AlignCenter)
 
 	u.buttons.AddButton(
-		"Повторить [F5]",
+		"Restart [F5]",
 		u.restartTranslation,
 	)
 
 	u.buttons.AddButton(
-		"Стоп [F8]",
+		"Stop [F8]",
 		u.stopTranslation,
 	)
 
 	u.buttons.AddButton(
-		"Настройки [Esc]",
+		"Settings [Esc]",
 		u.openSettings,
 	)
 
 	u.buttons.AddButton(
-		"Выход [Q]",
+		"Exit [Q]",
 		u.requestExit,
 	)
 
@@ -343,7 +343,7 @@ func (u *UI) restartTranslation() {
 	if u.controller != nil &&
 		u.controller.IsRunning() {
 		u.setMessage(
-			"Перевод уже выполняется.",
+			"Translation is already running.",
 			"yellow",
 		)
 
@@ -362,7 +362,7 @@ func (u *UI) startWithConfig(
 	if u.controller != nil &&
 		u.controller.IsRunning() {
 		u.setSettingsMessage(
-			"Перевод уже выполняется.",
+			"Translation is already running.",
 			"yellow",
 		)
 
@@ -370,7 +370,7 @@ func (u *UI) startWithConfig(
 	}
 
 	u.setSettingsMessage(
-		"Проверяем параметры и загружаем промпт...",
+		"Validating settings and loading prompt...",
 		"yellow",
 	)
 
@@ -378,7 +378,7 @@ func (u *UI) startWithConfig(
 	if err != nil {
 		u.setSettingsMessage(
 			fmt.Sprintf(
-				"Ошибка: %v",
+				"Error: %v",
 				err,
 			),
 			"red",
@@ -392,7 +392,7 @@ func (u *UI) startWithConfig(
 	u.config = preparedConfig
 
 	u.setMessage(
-		"Перевод запускается...",
+		"Starting translation...",
 		"yellow",
 	)
 
@@ -403,7 +403,7 @@ func (u *UI) startWithConfig(
 	if err != nil {
 		u.setMessage(
 			fmt.Sprintf(
-				"Не удалось запустить перевод: %v",
+				"Failed to start translation: %v",
 				err,
 			),
 			"red",
@@ -414,7 +414,7 @@ func (u *UI) startWithConfig(
 	}
 
 	u.setMessage(
-		"Перевод запущен.",
+		"Translation started.",
 		"yellow",
 	)
 
@@ -441,7 +441,7 @@ func createController(
 	)
 	if err != nil {
 		return nil, Config{}, fmt.Errorf(
-			"загрузить промпт: %w",
+			"load prompt: %w",
 			err,
 		)
 	}
@@ -457,7 +457,7 @@ func createController(
 	)
 	if err != nil {
 		return nil, Config{}, fmt.Errorf(
-			"создать Ollama-клиент: %w",
+			"create Ollama client: %w",
 			err,
 		)
 	}
@@ -466,7 +466,7 @@ func createController(
 		config.CachePath,
 	); err != nil {
 		return nil, Config{}, fmt.Errorf(
-			"открыть кеш переводов: %w",
+			"open translation cache: %w",
 			err,
 		)
 	}
@@ -500,7 +500,7 @@ func (u *UI) readSettings() (
 
 	if gameDir == "" {
 		return Config{}, fmt.Errorf(
-			"не указана папка игры",
+			"game folder is not specified",
 		)
 	}
 
@@ -509,7 +509,7 @@ func (u *UI) readSettings() (
 	)
 	if err != nil {
 		return Config{}, fmt.Errorf(
-			"определить путь к игре: %w",
+			"resolve game path: %w",
 			err,
 		)
 	}
@@ -519,14 +519,14 @@ func (u *UI) readSettings() (
 	)
 	if err != nil {
 		return Config{}, fmt.Errorf(
-			"открыть папку игры: %w",
+			"open game folder: %w",
 			err,
 		)
 	}
 
 	if !gameInfo.IsDir() {
 		return Config{}, fmt.Errorf(
-			"путь игры не является папкой: %s",
+			"game path is not a directory: %s",
 			absoluteGameDir,
 		)
 	}
@@ -537,7 +537,7 @@ func (u *UI) readSettings() (
 
 	if ollamaURL == "" {
 		return Config{}, fmt.Errorf(
-			"не указан адрес Ollama",
+			"Ollama address is not specified",
 		)
 	}
 
@@ -547,7 +547,7 @@ func (u *UI) readSettings() (
 
 	if model == "" {
 		return Config{}, fmt.Errorf(
-			"не указана модель Ollama",
+			"Ollama model is not specified",
 		)
 	}
 
@@ -557,7 +557,7 @@ func (u *UI) readSettings() (
 
 	if promptPath == "" {
 		return Config{}, fmt.Errorf(
-			"не указан файл промпта",
+			"prompt file is not specified",
 		)
 	}
 
@@ -566,7 +566,7 @@ func (u *UI) readSettings() (
 	)
 	if err != nil {
 		return Config{}, fmt.Errorf(
-			"определить путь к промпту: %w",
+			"resolve prompt path: %w",
 			err,
 		)
 	}
@@ -576,14 +576,14 @@ func (u *UI) readSettings() (
 	)
 	if err != nil {
 		return Config{}, fmt.Errorf(
-			"открыть файл промпта: %w",
+			"open prompt file: %w",
 			err,
 		)
 	}
 
 	if promptInfo.IsDir() {
 		return Config{}, fmt.Errorf(
-			"вместо файла промпта указана папка: %s",
+			"prompt path points to a directory: %s",
 			absolutePromptPath,
 		)
 	}
@@ -597,13 +597,13 @@ func (u *UI) readSettings() (
 	)
 	if err != nil {
 		return Config{}, fmt.Errorf(
-			"количество потоков должно быть числом",
+			"worker count must be a number",
 		)
 	}
 
 	if workers <= 0 {
 		return Config{}, fmt.Errorf(
-			"количество потоков должно быть больше нуля",
+			"worker count must be greater than zero",
 		)
 	}
 
@@ -647,7 +647,7 @@ func (u *UI) openSettings() {
 	if u.controller != nil &&
 		u.controller.IsRunning() {
 		u.setMessage(
-			"Сначала остановите перевод.",
+			"Stop the translation first.",
 			"yellow",
 		)
 
@@ -669,7 +669,7 @@ func (u *UI) stopTranslation() {
 	if u.controller == nil ||
 		!u.controller.Stop() {
 		u.setMessage(
-			"Сейчас перевод не выполняется.",
+			"No translation is currently running.",
 			"gray",
 		)
 
@@ -678,7 +678,7 @@ func (u *UI) stopTranslation() {
 	}
 
 	u.setMessage(
-		"Останавливаем перевод...",
+		"Stopping translation...",
 		"orange",
 	)
 
@@ -709,14 +709,14 @@ func (u *UI) waitForResult(
 			switch {
 			case result.Canceled:
 				u.setMessage(
-					"Перевод остановлен.",
+					"Translation stopped.",
 					"orange",
 				)
 
 			case result.Err != nil:
 				u.setMessage(
 					fmt.Sprintf(
-						"Перевод завершился с ошибкой: %v",
+						"Translation failed: %v",
 						result.Err,
 					),
 					"red",
@@ -724,13 +724,12 @@ func (u *UI) waitForResult(
 
 			default:
 				u.setMessage(
-					"Перевод успешно завершён.",
+					"Translation completed successfully.",
 					"green",
 				)
 			}
 
 			u.renderProgress()
-
 			if u.exitAfterStop {
 				u.finishExit()
 			}
@@ -742,7 +741,6 @@ func (u *UI) renderProgress() {
 	if u.state == nil {
 		return
 	}
-
 	snapshot := u.state.Snapshot()
 
 	u.renderHeader()
@@ -765,12 +763,12 @@ func (u *UI) renderHeader() {
 
 	u.header.SetText(
 		fmt.Sprintf(
-			"Игра:     %s\n"+
+			"Game:     %s\n"+
 				"Ollama:   %s\n"+
-				"Модель:   %s\n"+
-				"Промпт:   %s\n"+
-				"Потоки:   %d\n"+
-				"Кеш:      %s",
+				"Model:    %s\n"+
+				"Prompt:   %s\n"+
+				"Workers:  %d\n"+
+				"Cache:    %s",
 			u.config.GameDir,
 			u.config.OllamaURL,
 			u.config.Model,
@@ -805,7 +803,6 @@ func (u *UI) renderSummary(
 	)
 
 	color := "yellow"
-
 	switch {
 	case failedFiles > 0 || snapshot.Err != nil:
 		color = "red"
@@ -822,8 +819,8 @@ func (u *UI) renderSummary(
 	u.summary.SetText(
 		fmt.Sprintf(
 			"[%s]%s[-]  %d%%\n"+
-				"Строки: %d/%d   Файлы: %d/%d   "+
-				"Ошибки: %d   Отменено: %d   Время: %s",
+				"Lines: %d/%d   Files: %d/%d   "+
+				"Errors: %d   Canceled: %d   Time: %s",
 			color,
 			buildProgressBar(percent),
 			percent,
@@ -849,7 +846,6 @@ func (u *UI) renderFiles(
 	}
 
 	u.renderTableHeader()
-
 	for index, file := range snapshot.Files {
 		row := index + 1
 		statusText, statusColor := fileStatusPresentation(
@@ -907,7 +903,7 @@ func (u *UI) renderFiles(
 			1,
 			0,
 			tview.NewTableCell(
-				"Файлы обнаруживаются после запуска перевода...",
+				"Files will be discovered after translation starts...",
 			).
 				SetTextColor(tcell.ColorGray).
 				SetExpansion(1),
@@ -932,10 +928,10 @@ func (u *UI) renderFiles(
 
 func (u *UI) renderTableHeader() {
 	headers := []string{
-		"Файл",
-		"Статус",
-		"Прогресс",
-		"Ошибка",
+		"File",
+		"Status",
+		"Progress",
+		"Error",
 	}
 
 	for column, header := range headers {
@@ -972,7 +968,7 @@ func (u *UI) renderStatus(
 	switch {
 	case snapshot.Err != nil:
 		message = fmt.Sprintf(
-			"Ошибка: %v",
+			"Error: %v",
 			snapshot.Err,
 		)
 
@@ -980,18 +976,18 @@ func (u *UI) renderStatus(
 
 	case snapshot.Running:
 		if message == "" {
-			message = "Перевод выполняется..."
+			message = "Translation is running..."
 		}
 
 		color = "yellow"
 
 	case allFilesCompleted(snapshot.Files):
-		message = "Перевод успешно завершён."
+		message = "Translation completed successfully."
 		color = "green"
 	}
 
 	if message == "" {
-		message = "Готово."
+		message = "Ready."
 		color = "green"
 	}
 
@@ -1092,7 +1088,7 @@ func (u *UI) captureInput(
 	}
 
 	switch event.Rune() {
-	case 'q', 'Q', 'й', 'Й':
+	case 'q', 'Q':
 		u.requestExit()
 
 		return nil
@@ -1106,20 +1102,20 @@ func (u *UI) requestExit() {
 		return
 	}
 	u.exitDialogOpen = true
-	message := "Выйти из программы?"
+	message := "Exit the application?"
 
 	if u.controller != nil &&
 		u.controller.IsRunning() {
-		message = "Перевод ещё выполняется.\n\n" +
-			"Остановить перевод и выйти?"
+		message = "Translation is still running.\n\n" +
+			"Stop the translation and exit?"
 	}
 
 	modal := tview.NewModal().
 		SetText(message).
 		AddButtons(
 			[]string{
-				"Отмена",
-				"Выйти",
+				"Cancel",
+				"Exit",
 			},
 		)
 
@@ -1128,7 +1124,7 @@ func (u *UI) requestExit() {
 			buttonIndex int,
 			buttonLabel string,
 		) {
-			if buttonLabel == "Выйти" {
+			if buttonLabel == "Exit" {
 				u.beginExit()
 
 				return
@@ -1159,7 +1155,7 @@ func (u *UI) beginExit() {
 		u.controller.Stop()
 
 		u.setMessage(
-			"Останавливаем перевод перед выходом...",
+			"Stopping translation before exit...",
 			"orange",
 		)
 
@@ -1256,8 +1252,7 @@ func (u *UI) displayPath(
 }
 
 func calculatePercent(
-	completed int,
-	total int,
+	completed, total int,
 ) int {
 	if total <= 0 {
 		return 0
@@ -1304,13 +1299,13 @@ func fileProgressText(
 	if file.Total <= 0 {
 		switch file.Status {
 		case progress.FileStatusCompleted:
-			return "готово"
+			return "done"
 
 		case progress.FileStatusFailed:
-			return "ошибка"
+			return "error"
 
 		case progress.FileStatusCanceled:
-			return "отменено"
+			return "canceled"
 
 		default:
 			return "—"
@@ -1318,7 +1313,6 @@ func fileProgressText(
 	}
 
 	completed := file.Completed
-
 	if completed < 0 {
 		completed = 0
 	}
@@ -1347,23 +1341,23 @@ func fileStatusPresentation(
 ) {
 	switch status {
 	case progress.FileStatusWaiting:
-		return "Ожидает",
+		return "Waiting",
 			tcell.ColorGray
 
 	case progress.FileStatusRunning:
-		return "Перевод",
+		return "Translating",
 			tcell.ColorYellow
 
 	case progress.FileStatusCompleted:
-		return "Готово",
+		return "Done",
 			tcell.ColorGreen
 
 	case progress.FileStatusFailed:
-		return "Ошибка",
+		return "Error",
 			tcell.ColorRed
 
 	case progress.FileStatusCanceled:
-		return "Отменено",
+		return "Canceled",
 			tcell.ColorOrange
 
 	default:

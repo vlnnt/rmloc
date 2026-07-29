@@ -78,7 +78,6 @@ func (a *RmmzEngine) ProcessWeaponsContext(
 	}
 
 	reporter := a.Reporter()
-
 	reporter.FileDiscovered(
 		weaponsPath,
 		len(texts),
