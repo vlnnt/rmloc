@@ -17,12 +17,14 @@ const legacyDefaultPromptHash = "db1e77c67289a7e530646eef5310e10f3be21696710b2a7
 type PromptConfig struct {
 	Name                string
 	SingleTranslation   string
+	BatchTranslation    string
 	DialogueTranslation string
 }
 
 type promptConfigFile struct {
 	Name                string          `json:"name"`
 	SingleTranslation   json.RawMessage `json:"single_translation"`
+	BatchTranslation    json.RawMessage `json:"batch_translation"`
 	DialogueTranslation json.RawMessage `json:"dialogue_translation"`
 }
 
@@ -77,6 +79,18 @@ func LoadPromptConfig(
 		)
 	}
 
+	batchTranslation, err := decodePromptText(
+		file.BatchTranslation,
+		"batch_translation",
+	)
+	if err != nil {
+		return PromptConfig{}, fmt.Errorf(
+			"decode prompt file %s: %w",
+			absolutePath,
+			err,
+		)
+	}
+
 	dialogueTranslation, err := decodePromptText(
 		file.DialogueTranslation,
 		"dialogue_translation",
@@ -94,6 +108,7 @@ func LoadPromptConfig(
 			file.Name,
 		),
 		SingleTranslation:   singleTranslation,
+		BatchTranslation:    batchTranslation,
 		DialogueTranslation: dialogueTranslation,
 	}
 
@@ -109,6 +124,10 @@ func LoadPromptConfig(
 }
 
 func (p PromptConfig) Fingerprint() string {
+	return p.LegacyFingerprint()
+}
+
+func (p PromptConfig) LegacyFingerprint() string {
 	hash := sha256.Sum256(
 		[]byte(
 			strings.TrimSpace(
@@ -124,12 +143,56 @@ func (p PromptConfig) Fingerprint() string {
 	return hex.EncodeToString(hash[:])
 }
 
+func (p PromptConfig) SingleFingerprint() string {
+	return promptFingerprint(
+		"single_translation",
+		p.SingleTranslation,
+	)
+}
+
+func (p PromptConfig) BatchFingerprint() string {
+	return promptFingerprint(
+		"batch_translation",
+		p.BatchTranslation,
+	)
+}
+
+func (p PromptConfig) DialogueFingerprint() string {
+	return promptFingerprint(
+		"dialogue_translation",
+		p.DialogueTranslation,
+	)
+}
+
+func promptFingerprint(
+	kind string,
+	prompt string,
+) string {
+	hash := sha256.Sum256(
+		[]byte(
+			strings.TrimSpace(kind) +
+				"\x00" +
+				strings.TrimSpace(prompt),
+		),
+	)
+
+	return hex.EncodeToString(hash[:])
+}
+
 func (p PromptConfig) validate() error {
 	if strings.TrimSpace(
 		p.SingleTranslation,
 	) == "" {
 		return fmt.Errorf(
 			"single_translation is empty",
+		)
+	}
+
+	if strings.TrimSpace(
+		p.BatchTranslation,
+	) == "" {
+		return fmt.Errorf(
+			"batch_translation is empty",
 		)
 	}
 
@@ -218,7 +281,7 @@ var responseFormat = json.RawMessage(`{
 	"additionalProperties": false
 }`)
 
-var dialogueLinesResponseFormat = json.RawMessage(`{
+var translationLinesResponseFormat = json.RawMessage(`{
 	"type": "object",
 	"properties": {
 		"translations": {
@@ -231,3 +294,5 @@ var dialogueLinesResponseFormat = json.RawMessage(`{
 	"required": ["translations"],
 	"additionalProperties": false
 }`)
+
+var dialogueLinesResponseFormat = translationLinesResponseFormat

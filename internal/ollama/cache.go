@@ -9,11 +9,17 @@ import (
 	"strings"
 )
 
-const translationCacheVersion = 2
+const translationCacheVersion = 3
 
 const (
 	cacheKindTranslation = "translation"
 	cacheKindDialogue    = "dialogue"
+)
+
+const (
+	promptModeSingle   = "single"
+	promptModeBatch    = "batch"
+	promptModeDialogue = "dialogue"
 )
 
 func (c *Client) EnablePersistentCache(
@@ -34,7 +40,7 @@ func (c *Client) EnablePersistentCache(
 
 	if err := os.MkdirAll(
 		filepath.Dir(absolutePath),
-		0755,
+		0o755,
 	); err != nil {
 		return fmt.Errorf(
 			"create cache directory: %w",
@@ -69,7 +75,9 @@ func (c *Client) EnablePersistentCache(
 	loadedAliases := 0
 
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		line := strings.TrimSpace(
+			scanner.Text(),
+		)
 		if line == "" {
 			continue
 		}
@@ -86,25 +94,18 @@ func (c *Client) EnablePersistentCache(
 			continue
 		}
 
-		switch entry.Version {
-		case legacyTranslationCacheVersion:
-			if !c.allowLegacyCache {
-				continue
-			}
-
-		case translationCacheVersion:
-			if entry.PromptHash != c.promptHash {
-				continue
-			}
-
-		default:
+		if !c.matchesPersistentCacheEntry(
+			entry,
+		) {
 			continue
 		}
 
 		switch entry.Kind {
 		case cacheKindTranslation:
 			if entry.Key == "" ||
-				strings.TrimSpace(entry.Translation) == "" {
+				strings.TrimSpace(
+					entry.Translation,
+				) == "" {
 				continue
 			}
 
@@ -125,9 +126,10 @@ func (c *Client) EnablePersistentCache(
 			}
 
 			valid := true
-
 			for _, translation := range entry.Translations {
-				if strings.TrimSpace(translation) == "" {
+				if strings.TrimSpace(
+					translation,
+				) == "" {
 					valid = false
 					break
 				}
@@ -165,15 +167,82 @@ func (c *Client) EnablePersistentCache(
 	return nil
 }
 
+func (c *Client) matchesPersistentCacheEntry(
+	entry persistentCacheEntry,
+) bool {
+	switch entry.Version {
+	case legacyTranslationCacheVersion:
+		return c.allowLegacyCache
+
+	case 2:
+		return entry.PromptHash ==
+			c.legacyPromptHash
+
+	case translationCacheVersion:
+		return c.matchesCurrentPrompt(
+			entry.PromptMode,
+			entry.PromptHash,
+			entry.Kind,
+		)
+
+	default:
+		return false
+	}
+}
+
+func (c *Client) matchesCurrentPrompt(
+	mode, hash, kind string,
+) bool {
+	switch mode {
+	case promptModeSingle:
+		return kind == cacheKindTranslation &&
+			hash == c.singlePromptHash
+
+	case promptModeBatch:
+		return kind == cacheKindTranslation &&
+			hash == c.batchPromptHash
+
+	case promptModeDialogue:
+		return kind == cacheKindDialogue &&
+			hash == c.dialoguePromptHash
+
+	default:
+		return false
+	}
+}
+
 func (c *Client) persistTranslation(
+	key, translation string,
+) error {
+	return c.persistTranslationForMode(
+		promptModeSingle,
+		c.singlePromptHash,
+		key,
+		translation,
+	)
+}
+
+func (c *Client) persistBatchTranslation(
 	key string,
 	translation string,
+) error {
+	return c.persistTranslationForMode(
+		promptModeBatch,
+		c.batchPromptHash,
+		key,
+		translation,
+	)
+}
+
+func (c *Client) persistTranslationForMode(
+	mode, promptHash, key, translation string,
 ) error {
 	return c.appendPersistentCacheEntry(
 		persistentCacheEntry{
 			Version:     translationCacheVersion,
 			Model:       c.model,
-			PromptHash:  c.promptHash,
+			PromptMode:  mode,
+			PromptHash:  promptHash,
 			Kind:        cacheKindTranslation,
 			Key:         key,
 			Translation: translation,
@@ -189,7 +258,8 @@ func (c *Client) persistDialogue(
 		persistentCacheEntry{
 			Version:      translationCacheVersion,
 			Model:        c.model,
-			PromptHash:   c.promptHash,
+			PromptMode:   promptModeDialogue,
+			PromptHash:   c.dialoguePromptHash,
 			Kind:         cacheKindDialogue,
 			Key:          key,
 			Translations: copyStrings(translations),
@@ -210,7 +280,7 @@ func (c *Client) appendPersistentCacheEntry(
 	file, err := os.OpenFile(
 		c.cachePath,
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
-		0644,
+		0o644,
 	)
 	if err != nil {
 		return fmt.Errorf(

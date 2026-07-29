@@ -2,7 +2,9 @@ package rmmz
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -16,8 +18,30 @@ import (
 func (a *RmmzEngine) ProcessSkills(
 	gameDir string,
 ) error {
+	return a.ProcessSkillsContext(
+		context.Background(),
+		gameDir,
+	)
+}
+
+func (a *RmmzEngine) ProcessSkillsContext(
+	ctx context.Context,
+	gameDir string,
+) (resultErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	skillsPath, err := findSkillsFile(gameDir)
 	if err != nil {
+		return err
+	}
+
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
@@ -45,6 +69,43 @@ func (a *RmmzEngine) ProcessSkills(
 		)
 	}
 
+	reporter := a.Reporter()
+	reporter.FileDiscovered(
+		skillsPath,
+		len(texts),
+	)
+
+	reporter.FileStarted(
+		skillsPath,
+	)
+
+	defer func() {
+		switch {
+		case resultErr == nil:
+			reporter.FileCompleted(
+				skillsPath,
+			)
+
+		case errors.Is(
+			resultErr,
+			context.Canceled,
+		) ||
+			errors.Is(
+				resultErr,
+				context.DeadlineExceeded,
+			):
+			reporter.FileCanceled(
+				skillsPath,
+			)
+
+		default:
+			reporter.FileFailed(
+				skillsPath,
+				resultErr,
+			)
+		}
+	}()
+
 	fmt.Printf(
 		"Found file: %s\n",
 		skillsPath,
@@ -55,42 +116,41 @@ func (a *RmmzEngine) ProcessSkills(
 		len(texts),
 	)
 
-	cache := make(map[string]string)
-	for index := range texts {
-		text := &texts[index]
-		fmt.Printf(
-			"[%d/%d] skill=%d field=%s text=%q\n",
-			index+1,
-			len(texts),
-			text.SkillID,
-			text.Field,
-			text.Text,
-		)
-
-		translated, exists := cache[text.Text]
-		if !exists {
-			translated, err = a.ollamaClient.Translate(
-				text.Text,
+	if err := translateTextEntries(
+		ctx,
+		a.ollamaClient,
+		reporter,
+		skillsPath,
+		texts,
+		func(
+			text *skills.SkillText,
+		) string {
+			return text.Text
+		},
+		func(
+			text *skills.SkillText,
+			translation string,
+		) {
+			text.Text = translation
+		},
+		func(
+			text *skills.SkillText,
+		) string {
+			return fmt.Sprintf(
+				"skill=%d field=%s",
+				text.SkillID,
+				text.Field,
 			)
-			if err != nil {
-				return fmt.Errorf(
-					"translate skill %d field %s: %w",
-					text.SkillID,
-					text.Field,
-					err,
-				)
-			}
+		},
+	); err != nil {
+		return fmt.Errorf(
+			"translate Skills.json: %w",
+			err,
+		)
+	}
 
-			if strings.TrimSpace(translated) == "" {
-				return fmt.Errorf(
-					"empty translation for skill %d field %s",
-					text.SkillID,
-					text.Field,
-				)
-			}
-			cache[text.Text] = translated
-		}
-		text.Text = translated
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	translatedData, err := applySkillTranslations(
@@ -98,6 +158,10 @@ func (a *RmmzEngine) ProcessSkills(
 		texts,
 	)
 	if err != nil {
+		return err
+	}
+
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
@@ -113,7 +177,14 @@ func (a *RmmzEngine) ProcessSkills(
 		)
 	}
 
-	defer os.Remove(tempPath)
+	defer os.Remove(
+		tempPath,
+	)
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	oldDir := filepath.Join(
 		filepath.Dir(skillsPath),
 		"old",
@@ -121,7 +192,7 @@ func (a *RmmzEngine) ProcessSkills(
 
 	if err := os.MkdirAll(
 		oldDir,
-		0755,
+		0o755,
 	); err != nil {
 		return fmt.Errorf(
 			"create old directory: %w",
@@ -131,13 +202,19 @@ func (a *RmmzEngine) ProcessSkills(
 
 	backupName := fmt.Sprintf(
 		"Skills_%s.json",
-		time.Now().Format("20060102_150405"),
+		time.Now().Format(
+			"20060102_150405",
+		),
 	)
 
 	backupPath := filepath.Join(
 		oldDir,
 		backupName,
 	)
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	if err := os.Rename(
 		skillsPath,
@@ -196,6 +273,21 @@ func findSkillsFile(
 		)
 	}
 
+	info, err := os.Stat(rootDir)
+	if err != nil {
+		return "", fmt.Errorf(
+			"open game directory: %w",
+			err,
+		)
+	}
+
+	if !info.IsDir() {
+		return "", fmt.Errorf(
+			"game path is not a directory: %s",
+			rootDir,
+		)
+	}
+
 	candidates := []string{
 		filepath.Join(
 			rootDir,
@@ -224,7 +316,9 @@ func findSkillsFile(
 	err = filepath.WalkDir(
 		rootDir,
 		func(
-			path string, entry fs.DirEntry, walkErr error,
+			path string,
+			entry fs.DirEntry,
+			walkErr error,
 		) error {
 			if walkErr != nil {
 				return walkErr
@@ -232,7 +326,10 @@ func findSkillsFile(
 
 			if entry.IsDir() {
 				switch entry.Name() {
-				case ".git", "node_modules", "old":
+				case ".git",
+					"node_modules",
+					"old",
+					".rmloc":
 					return filepath.SkipDir
 				}
 
@@ -304,14 +401,21 @@ func applySkillTranslations(
 				text.SkillIndex,
 			)
 		}
+
 		record[text.Field] = text.Text
 	}
 
 	var output bytes.Buffer
-	encoder := json.NewEncoder(&output)
-	encoder.SetIndent("", "  ")
-	encoder.SetEscapeHTML(false)
+	encoder := json.NewEncoder(
+		&output,
+	)
 
+	encoder.SetIndent(
+		"",
+		"  ",
+	)
+
+	encoder.SetEscapeHTML(false)
 	if err := encoder.Encode(records); err != nil {
 		return nil, fmt.Errorf(
 			"encode Skills.json: %w",

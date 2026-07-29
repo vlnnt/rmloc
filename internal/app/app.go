@@ -1,11 +1,16 @@
 package app
 
 import (
-	"runtime"
+	"context"
 
 	"golang.org/x/sync/errgroup"
 
 	"rmloc/internal/app/rmmz"
+)
+
+const (
+	defaultWorkers = 2
+	maxWorkers     = 4
 )
 
 type App struct {
@@ -18,15 +23,11 @@ func NewApp(
 	workers int,
 ) *App {
 	if workers <= 0 {
-		workers = runtime.NumCPU() / 2
+		workers = defaultWorkers
 	}
 
-	if workers < 1 {
-		workers = 1
-	}
-
-	if workers > 4 {
-		workers = 4
+	if workers > maxWorkers {
+		workers = maxWorkers
 	}
 
 	return &App{
@@ -38,50 +39,152 @@ func NewApp(
 func (a *App) Run(
 	gameDir string,
 ) error {
-	mapFiles, err := a.rmmzEngine.FindMapFiles(gameDir)
+	return a.RunContext(
+		context.Background(),
+		gameDir,
+	)
+}
+
+func (a *App) RunContext(
+	ctx context.Context,
+	gameDir string,
+) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	translationFiles, err := a.rmmzEngine.DiscoverTranslationFilesContext(
+		ctx,
+		gameDir,
+	)
 	if err != nil {
 		return err
 	}
 
-	jobs := []func() error{
-		func() error {
-			return a.rmmzEngine.ProcessActors(gameDir)
+	reporter := a.rmmzEngine.Reporter()
+	for _, filePath := range translationFiles {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		reporter.FileDiscovered(
+			filePath,
+			0,
+		)
+	}
+
+	mapFiles, err := a.rmmzEngine.FindMapFilesContext(
+		ctx,
+		gameDir,
+	)
+	if err != nil {
+		return err
+	}
+
+	type job func(context.Context) error
+	jobs := []job{
+		func(
+			ctx context.Context,
+		) error {
+			return a.rmmzEngine.ProcessActorsContext(
+				ctx,
+				gameDir,
+			)
 		},
-		func() error {
-			return a.rmmzEngine.ProcessArmors(gameDir)
+		func(
+			ctx context.Context,
+		) error {
+			return a.rmmzEngine.ProcessArmorsContext(
+				ctx,
+				gameDir,
+			)
 		},
-		func() error {
-			return a.rmmzEngine.ProcessEnemies(gameDir)
+		func(
+			ctx context.Context,
+		) error {
+			return a.rmmzEngine.ProcessEnemiesContext(
+				ctx,
+				gameDir,
+			)
 		},
-		func() error {
-			return a.rmmzEngine.ProcessItems(gameDir)
+		func(
+			ctx context.Context,
+		) error {
+			return a.rmmzEngine.ProcessItemsContext(
+				ctx,
+				gameDir,
+			)
 		},
-		func() error {
-			return a.rmmzEngine.ProcessSkills(gameDir)
+		func(
+			ctx context.Context,
+		) error {
+			return a.rmmzEngine.ProcessSkillsContext(
+				ctx,
+				gameDir,
+			)
 		},
-		func() error {
-			return a.rmmzEngine.ProcessStates(gameDir)
+		func(
+			ctx context.Context,
+		) error {
+			return a.rmmzEngine.ProcessStatesContext(
+				ctx,
+				gameDir,
+			)
 		},
-		func() error {
-			return a.rmmzEngine.ProcessWeapons(gameDir)
+		func(
+			ctx context.Context,
+		) error {
+			return a.rmmzEngine.ProcessWeaponsContext(
+				ctx,
+				gameDir,
+			)
 		},
 	}
 
 	for _, mapPath := range mapFiles {
-		mapPath := mapPath
+		currentMapPath := mapPath
 		jobs = append(
 			jobs,
-			func() error {
-				return a.rmmzEngine.ProcessMap(mapPath)
+			func(
+				ctx context.Context,
+			) error {
+				return a.rmmzEngine.ProcessMapContext(
+					ctx,
+					currentMapPath,
+				)
 			},
 		)
 	}
 
-	var group errgroup.Group
-	group.SetLimit(a.workers)
+	group, groupContext := errgroup.WithContext(
+		ctx,
+	)
 
-	for _, job := range jobs {
-		group.Go(job)
+	group.SetLimit(
+		a.workers,
+	)
+
+	for _, currentJob := range jobs {
+		if err := groupContext.Err(); err != nil {
+			break
+		}
+
+		currentJob := currentJob
+		group.Go(
+			func() error {
+				if err := groupContext.Err(); err != nil {
+					return err
+				}
+
+				return currentJob(
+					groupContext,
+				)
+			},
+		)
 	}
 
 	return group.Wait()

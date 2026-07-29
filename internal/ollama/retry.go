@@ -1,6 +1,7 @@
 package ollama
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -42,28 +43,69 @@ func isRetryableError(
 	err error,
 ) bool {
 	var target *retryableError
-	return errors.As(err, &target)
+
+	return errors.As(
+		err,
+		&target,
+	)
 }
 
 func (c *Client) retryOperation(
-	operation func() error,
+	ctx context.Context,
+	operation func(context.Context) error,
 ) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	var lastErr error
 	for attempt := 0; attempt < maxRequestAttempts; attempt++ {
-		if attempt > 0 {
-			c.recordRetryAttempt()
-			time.Sleep(requestRetryDelays[attempt])
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
-		err := operation()
+		if attempt > 0 {
+			c.recordRetryAttempt()
+
+			if err := waitForRetry(
+				ctx,
+				requestRetryDelays[attempt],
+			); err != nil {
+				return err
+			}
+		}
+
+		err := operation(ctx)
 		if err == nil {
 			return nil
 		}
 
+		if errors.Is(
+			err,
+			context.Canceled,
+		) ||
+			errors.Is(
+				err,
+				context.DeadlineExceeded,
+			) {
+			return err
+		}
+
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+
 		lastErr = err
+
 		if !isRetryableError(err) {
 			return err
 		}
+	}
+
+	if lastErr == nil {
+		return fmt.Errorf(
+			"operation failed without an error",
+		)
 	}
 
 	return fmt.Errorf(
@@ -71,6 +113,26 @@ func (c *Client) retryOperation(
 		maxRequestAttempts,
 		lastErr,
 	)
+}
+
+func waitForRetry(
+	ctx context.Context,
+	delay time.Duration,
+) error {
+	if delay <= 0 {
+		return ctx.Err()
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+
+	case <-timer.C:
+		return nil
+	}
 }
 
 func isRetryableStatus(

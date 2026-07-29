@@ -2,7 +2,9 @@ package rmmz
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -16,8 +18,30 @@ import (
 func (a *RmmzEngine) ProcessItems(
 	gameDir string,
 ) error {
+	return a.ProcessItemsContext(
+		context.Background(),
+		gameDir,
+	)
+}
+
+func (a *RmmzEngine) ProcessItemsContext(
+	ctx context.Context,
+	gameDir string,
+) (resultErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	itemsPath, err := findItemsFile(gameDir)
 	if err != nil {
+		return err
+	}
+
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
@@ -45,6 +69,43 @@ func (a *RmmzEngine) ProcessItems(
 		)
 	}
 
+	reporter := a.Reporter()
+	reporter.FileDiscovered(
+		itemsPath,
+		len(texts),
+	)
+
+	reporter.FileStarted(
+		itemsPath,
+	)
+
+	defer func() {
+		switch {
+		case resultErr == nil:
+			reporter.FileCompleted(
+				itemsPath,
+			)
+
+		case errors.Is(
+			resultErr,
+			context.Canceled,
+		) ||
+			errors.Is(
+				resultErr,
+				context.DeadlineExceeded,
+			):
+			reporter.FileCanceled(
+				itemsPath,
+			)
+
+		default:
+			reporter.FileFailed(
+				itemsPath,
+				resultErr,
+			)
+		}
+	}()
+
 	fmt.Printf(
 		"Found file: %s\n",
 		itemsPath,
@@ -55,42 +116,41 @@ func (a *RmmzEngine) ProcessItems(
 		len(texts),
 	)
 
-	cache := make(map[string]string)
-	for index := range texts {
-		text := &texts[index]
-		fmt.Printf(
-			"[%d/%d] item=%d field=%s text=%q\n",
-			index+1,
-			len(texts),
-			text.ItemID,
-			text.Field,
-			text.Text,
-		)
-
-		translated, exists := cache[text.Text]
-		if !exists {
-			translated, err = a.ollamaClient.Translate(
-				text.Text,
+	if err := translateTextEntries(
+		ctx,
+		a.ollamaClient,
+		reporter,
+		itemsPath,
+		texts,
+		func(
+			text *items.ItemText,
+		) string {
+			return text.Text
+		},
+		func(
+			text *items.ItemText,
+			translation string,
+		) {
+			text.Text = translation
+		},
+		func(
+			text *items.ItemText,
+		) string {
+			return fmt.Sprintf(
+				"item=%d field=%s",
+				text.ItemID,
+				text.Field,
 			)
-			if err != nil {
-				return fmt.Errorf(
-					"translate item %d field %s: %w",
-					text.ItemID,
-					text.Field,
-					err,
-				)
-			}
+		},
+	); err != nil {
+		return fmt.Errorf(
+			"translate Items.json: %w",
+			err,
+		)
+	}
 
-			if strings.TrimSpace(translated) == "" {
-				return fmt.Errorf(
-					"empty translation for item %d field %s",
-					text.ItemID,
-					text.Field,
-				)
-			}
-			cache[text.Text] = translated
-		}
-		text.Text = translated
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	translatedData, err := applyItemTranslations(
@@ -98,6 +158,10 @@ func (a *RmmzEngine) ProcessItems(
 		texts,
 	)
 	if err != nil {
+		return err
+	}
+
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
@@ -113,7 +177,14 @@ func (a *RmmzEngine) ProcessItems(
 		)
 	}
 
-	defer os.Remove(tempPath)
+	defer os.Remove(
+		tempPath,
+	)
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	oldDir := filepath.Join(
 		filepath.Dir(itemsPath),
 		"old",
@@ -121,7 +192,7 @@ func (a *RmmzEngine) ProcessItems(
 
 	if err := os.MkdirAll(
 		oldDir,
-		0755,
+		0o755,
 	); err != nil {
 		return fmt.Errorf(
 			"create old directory: %w",
@@ -131,13 +202,19 @@ func (a *RmmzEngine) ProcessItems(
 
 	backupName := fmt.Sprintf(
 		"Items_%s.json",
-		time.Now().Format("20060102_150405"),
+		time.Now().Format(
+			"20060102_150405",
+		),
 	)
 
 	backupPath := filepath.Join(
 		oldDir,
 		backupName,
 	)
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	if err := os.Rename(
 		itemsPath,
@@ -196,6 +273,21 @@ func findItemsFile(
 		)
 	}
 
+	info, err := os.Stat(rootDir)
+	if err != nil {
+		return "", fmt.Errorf(
+			"open game directory: %w",
+			err,
+		)
+	}
+
+	if !info.IsDir() {
+		return "", fmt.Errorf(
+			"game path is not a directory: %s",
+			rootDir,
+		)
+	}
+
 	candidates := []string{
 		filepath.Join(
 			rootDir,
@@ -224,7 +316,9 @@ func findItemsFile(
 	err = filepath.WalkDir(
 		rootDir,
 		func(
-			path string, entry fs.DirEntry, walkErr error,
+			path string,
+			entry fs.DirEntry,
+			walkErr error,
 		) error {
 			if walkErr != nil {
 				return walkErr
@@ -232,7 +326,10 @@ func findItemsFile(
 
 			if entry.IsDir() {
 				switch entry.Name() {
-				case ".git", "node_modules", "old":
+				case ".git",
+					"node_modules",
+					"old",
+					".rmloc":
 					return filepath.SkipDir
 				}
 
@@ -310,10 +407,16 @@ func applyItemTranslations(
 	}
 
 	var output bytes.Buffer
-	encoder := json.NewEncoder(&output)
-	encoder.SetIndent("", "  ")
-	encoder.SetEscapeHTML(false)
+	encoder := json.NewEncoder(
+		&output,
+	)
 
+	encoder.SetIndent(
+		"",
+		"  ",
+	)
+
+	encoder.SetEscapeHTML(false)
 	if err := encoder.Encode(records); err != nil {
 		return nil, fmt.Errorf(
 			"encode Items.json: %w",

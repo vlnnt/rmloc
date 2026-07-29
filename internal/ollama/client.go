@@ -1,56 +1,84 @@
 package ollama
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/valyala/fasthttp"
 )
 
 const (
-	singleTranslationNumPredict      = 192
-	dialogueTranslationNumPredict    = 512
-	translationNumCtx                = 2048
+	translationNumCtx = 4096
+
+	singleTranslationNumPredict = 512
+
+	batchTranslationNumPredict = 1536
+	batchTranslationMaxTexts   = 8
+	batchTranslationMaxRunes   = 2400
+
+	dialogueTranslationNumPredict = 1536
+
 	maxTranslationValidationAttempts = 3
 	translationValidationRetryDelay  = 500 * time.Millisecond
 )
-
-type translationValidationError struct {
-	attempts int
-	err      error
-}
 
 func NewClient(
 	baseURL string,
 	model string,
 	prompts PromptConfig,
 ) (*Client, error) {
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	baseURL = strings.TrimRight(
+		strings.TrimSpace(baseURL),
+		"/",
+	)
 	if baseURL == "" {
-		return nil, fmt.Errorf("Ollama base URL is empty")
+		return nil, fmt.Errorf(
+			"Ollama base URL is empty",
+		)
 	}
 
 	model = strings.TrimSpace(model)
 	if model == "" {
-		return nil, fmt.Errorf("Ollama model is empty")
+		return nil, fmt.Errorf(
+			"Ollama model is empty",
+		)
 	}
 
 	if err := prompts.validate(); err != nil {
-		return nil, fmt.Errorf("validate prompts: %w", err)
+		return nil, fmt.Errorf(
+			"validate prompts: %w",
+			err,
+		)
 	}
 
-	promptHash := prompts.Fingerprint()
-
+	legacyPromptHash := prompts.LegacyFingerprint()
 	return &Client{
-		baseURL:                   baseURL,
-		model:                     model,
-		singleTranslationPrompt:   strings.TrimSpace(prompts.SingleTranslation),
-		dialogueTranslationPrompt: strings.TrimSpace(prompts.DialogueTranslation),
-		promptHash:                promptHash,
-		allowLegacyCache:          promptHash == legacyDefaultPromptHash,
+		baseURL: baseURL,
+		model:   model,
+
+		singleTranslationPrompt: strings.TrimSpace(
+			prompts.SingleTranslation,
+		),
+		batchTranslationPrompt: strings.TrimSpace(
+			prompts.BatchTranslation,
+		),
+		dialogueTranslationPrompt: strings.TrimSpace(
+			prompts.DialogueTranslation,
+		),
+
+		legacyPromptHash:   legacyPromptHash,
+		singlePromptHash:   prompts.SingleFingerprint(),
+		batchPromptHash:    prompts.BatchFingerprint(),
+		dialoguePromptHash: prompts.DialogueFingerprint(),
+
+		allowLegacyCache: legacyPromptHash ==
+			legacyDefaultPromptHash,
+
 		httpClient: &fasthttp.Client{
 			ReadTimeout:  5 * time.Minute,
 			WriteTimeout: 10 * time.Second,
@@ -62,23 +90,45 @@ func NewClient(
 func (c *Client) Translate(
 	text string,
 ) (string, error) {
-	return c.translate(text, true)
+	return c.TranslateContext(
+		context.Background(),
+		text,
+	)
+}
+
+func (c *Client) TranslateContext(
+	ctx context.Context,
+	text string,
+) (string, error) {
+	return c.translate(
+		normalizeContext(ctx),
+		text,
+		true,
+	)
 }
 
 func (c *Client) translate(
+	ctx context.Context,
 	text string,
 	recordInput bool,
 ) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	if recordInput {
 		c.recordInputTexts(1)
 	}
 
 	if strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf("text is empty")
+		return "", fmt.Errorf(
+			"text is empty",
+		)
 	}
 
 	if !needsTranslation(text) {
 		c.recordSkippedTexts(1)
+
 		return text, nil
 	}
 
@@ -95,9 +145,14 @@ func (c *Client) translate(
 	}
 
 	requestKey := "translation:" + text
-	value, err, _ := c.requestGroup.Do(
+	value, err, _ := c.doSingleflightContext(
+		ctx,
 		requestKey,
 		func() (any, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+
 			if cached, exists := c.translationCache.Load(text); exists {
 				translation, ok := cached.(string)
 				if !ok {
@@ -112,11 +167,22 @@ func (c *Client) translate(
 
 			protected := protectText(text)
 			restoredTranslation, err := c.translateProtectedText(
+				ctx,
 				protected,
 			)
 			if err != nil {
 				if !isTranslationValidationError(err) {
 					return nil, err
+				}
+
+				if persistErr := c.persistTranslation(
+					text,
+					text,
+				); persistErr != nil {
+					return nil, fmt.Errorf(
+						"persist unchanged translation: %w",
+						persistErr,
+					)
 				}
 
 				c.storeTranslationCacheEntry(
@@ -129,11 +195,18 @@ func (c *Client) translate(
 					"Warning: the text could not be translated safely; "+
 						"the original text was left unchanged. "+
 						"Text: %q. Reason: %v\n",
-					truncateForLog(text, 180),
+					truncateForLog(
+						text,
+						180,
+					),
 					err,
 				)
 
 				return text, nil
+			}
+
+			if err := ctx.Err(); err != nil {
+				return nil, err
 			}
 
 			if err := c.persistTranslation(
@@ -169,16 +242,445 @@ func (c *Client) translate(
 	return translation, nil
 }
 
+func (c *Client) TranslateBatch(
+	texts []string,
+) ([]string, error) {
+	return c.TranslateBatchContext(
+		context.Background(),
+		texts,
+	)
+}
+
+func (c *Client) TranslateBatchContext(
+	ctx context.Context,
+	texts []string,
+) ([]string, error) {
+	ctx = normalizeContext(ctx)
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	c.recordInputTexts(
+		len(texts),
+	)
+
+	if len(texts) == 0 {
+		return nil, fmt.Errorf(
+			"texts are empty",
+		)
+	}
+
+	result := copyStrings(texts)
+	entries := make(
+		[]batchTextEntry,
+		0,
+		len(texts),
+	)
+
+	entryByText := make(
+		map[string]int,
+		len(texts),
+	)
+
+	for index, text := range texts {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		if strings.TrimSpace(text) == "" {
+			c.recordSkippedTexts(1)
+			continue
+		}
+
+		if !needsTranslation(text) {
+			c.recordSkippedTexts(1)
+			continue
+		}
+
+		if cached, exists := c.translationCache.Load(text); exists {
+			translation, ok := cached.(string)
+			if !ok {
+				return nil, fmt.Errorf(
+					"invalid cached translation type",
+				)
+			}
+
+			result[index] = translation
+			c.recordCacheHit(1)
+			continue
+		}
+
+		if entryIndex, exists := entryByText[text]; exists {
+			entries[entryIndex].indexes = append(
+				entries[entryIndex].indexes,
+				index,
+			)
+
+			continue
+		}
+
+		entryByText[text] = len(entries)
+		entries = append(
+			entries,
+			batchTextEntry{
+				text: text,
+				indexes: []int{
+					index,
+				},
+			},
+		)
+	}
+
+	if len(entries) == 0 {
+		return result, nil
+	}
+
+	pendingTexts := make(
+		[]string,
+		len(entries),
+	)
+
+	for index := range entries {
+		pendingTexts[index] = entries[index].text
+	}
+
+	translations, err := c.translateBatchTexts(
+		ctx,
+		pendingTexts,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(translations) != len(entries) {
+		return nil, fmt.Errorf(
+			"batch translation count mismatch: received %d, expected %d",
+			len(translations),
+			len(entries),
+		)
+	}
+
+	for entryIndex, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		translation := translations[entryIndex]
+		for _, resultIndex := range entry.indexes {
+			result[resultIndex] = translation
+		}
+
+		if len(entry.indexes) > 1 {
+			c.recordCacheHit(
+				len(entry.indexes) - 1,
+			)
+		}
+	}
+
+	return result, nil
+}
+
+func (c *Client) translateBatchTexts(
+	ctx context.Context,
+	texts []string,
+) ([]string, error) {
+	result := make(
+		[]string,
+		0,
+		len(texts),
+	)
+
+	for start := 0; start < len(texts); {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		end := batchTextEnd(
+			texts,
+			start,
+		)
+
+		translations, err := c.translateBatchChunk(
+			ctx,
+			texts[start:end],
+		)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"translate batch elements %d-%d: %w",
+				start,
+				end-1,
+				err,
+			)
+		}
+
+		result = append(
+			result,
+			translations...,
+		)
+
+		start = end
+	}
+
+	return result, nil
+}
+
+func batchTextEnd(
+	texts []string,
+	start int,
+) int {
+	if start < 0 ||
+		start >= len(texts) {
+		return start
+	}
+
+	end := start
+	totalRunes := 0
+
+	for end < len(texts) &&
+		end-start < batchTranslationMaxTexts {
+		textRunes := utf8.RuneCountInString(
+			texts[end],
+		)
+
+		if end > start &&
+			totalRunes+textRunes > batchTranslationMaxRunes {
+			break
+		}
+
+		totalRunes += textRunes
+		end++
+	}
+
+	if end == start {
+		return start + 1
+	}
+
+	return end
+}
+
+func (c *Client) translateBatchChunk(
+	ctx context.Context,
+	texts []string,
+) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(texts) == 0 {
+		return nil, nil
+	}
+
+	result := make(
+		[]string,
+		len(texts),
+	)
+
+	pendingTexts := make(
+		[]string,
+		0,
+		len(texts),
+	)
+
+	pendingIndexes := make(
+		[]int,
+		0,
+		len(texts),
+	)
+
+	for index, text := range texts {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		if cached, exists := c.translationCache.Load(text); exists {
+			translation, ok := cached.(string)
+			if !ok {
+				return nil, fmt.Errorf(
+					"invalid cached translation type",
+				)
+			}
+
+			result[index] = translation
+			c.recordCacheHit(1)
+
+			continue
+		}
+
+		pendingTexts = append(
+			pendingTexts,
+			text,
+		)
+
+		pendingIndexes = append(
+			pendingIndexes,
+			index,
+		)
+	}
+
+	if len(pendingTexts) == 0 {
+		return result, nil
+	}
+
+	translations, err := c.translateBatchRequest(
+		ctx,
+		pendingTexts,
+	)
+	if err != nil {
+		if !isTranslationValidationError(err) {
+			return nil, err
+		}
+
+		if len(pendingTexts) == 1 {
+			translation, lineErr := c.translate(
+				ctx,
+				pendingTexts[0],
+				false,
+			)
+			if lineErr != nil {
+				return nil, fmt.Errorf(
+					"translate batch element separately: %w",
+					lineErr,
+				)
+			}
+
+			translations = []string{
+				translation,
+			}
+		} else {
+			fmt.Printf(
+				"Warning: the batch translation of %d independent texts "+
+					"failed validation; the batch will be split. "+
+					"Reason: %v\n",
+				len(pendingTexts),
+				err,
+			)
+
+			middle := len(pendingTexts) / 2
+			leftTranslations, leftErr := c.translateBatchChunk(
+				ctx,
+				pendingTexts[:middle],
+			)
+			if leftErr != nil {
+				return nil, leftErr
+			}
+
+			rightTranslations, rightErr := c.translateBatchChunk(
+				ctx,
+				pendingTexts[middle:],
+			)
+			if rightErr != nil {
+				return nil, rightErr
+			}
+
+			translations = append(
+				leftTranslations,
+				rightTranslations...,
+			)
+		}
+	}
+
+	if len(translations) != len(pendingTexts) {
+		return nil, fmt.Errorf(
+			"batch translation count mismatch after fallback: received %d, expected %d",
+			len(translations),
+			len(pendingTexts),
+		)
+	}
+
+	for index, pendingIndex := range pendingIndexes {
+		result[pendingIndex] = translations[index]
+	}
+
+	return result, nil
+}
+
+func (c *Client) translateBatchRequest(
+	ctx context.Context,
+	texts []string,
+) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	protectedLines, protectedValues := protectLines(
+		texts,
+	)
+
+	restoredTranslations, err := c.translateProtectedBatch(
+		ctx,
+		protectedLines,
+		protectedValues,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	for index, translation := range restoredTranslations {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		if err := c.persistBatchTranslation(
+			texts[index],
+			translation,
+		); err != nil {
+			return nil, fmt.Errorf(
+				"persist batch translation %d: %w",
+				index,
+				err,
+			)
+		}
+
+		c.storeTranslationCacheEntry(
+			texts[index],
+			translation,
+		)
+	}
+
+	c.recordModelTranslatedTexts(
+		len(texts),
+	)
+
+	return copyStrings(
+		restoredTranslations,
+	), nil
+}
+
 func (c *Client) TranslateLines(
 	lines []string,
 ) ([]string, error) {
-	c.recordInputTexts(len(lines))
+	return c.TranslateLinesContext(
+		context.Background(),
+		lines,
+	)
+}
+
+func (c *Client) TranslateLinesContext(
+	ctx context.Context,
+	lines []string,
+) ([]string, error) {
+	ctx = normalizeContext(ctx)
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	c.recordInputTexts(
+		len(lines),
+	)
+
 	if len(lines) == 0 {
-		return nil, fmt.Errorf("lines are empty")
+		return nil, fmt.Errorf(
+			"lines are empty",
+		)
 	}
 
 	if !needsAnyTranslation(lines) {
-		c.recordSkippedTexts(len(lines))
+		c.recordSkippedTexts(
+			len(lines),
+		)
+
 		return copyStrings(lines), nil
 	}
 
@@ -194,7 +696,10 @@ func (c *Client) TranslateLines(
 		)
 	}
 
-	cacheKey := string(originalRequestBody)
+	cacheKey := string(
+		originalRequestBody,
+	)
+
 	if cached, exists := c.dialogueCache.Load(cacheKey); exists {
 		translations, ok := cached.([]string)
 		if !ok {
@@ -203,14 +708,24 @@ func (c *Client) TranslateLines(
 			)
 		}
 
-		c.recordCacheHit(len(lines))
-		return copyStrings(translations), nil
+		c.recordCacheHit(
+			len(lines),
+		)
+
+		return copyStrings(
+			translations,
+		), nil
 	}
 
 	requestKey := "dialogue:" + cacheKey
-	value, err, _ := c.requestGroup.Do(
+	value, err, _ := c.doSingleflightContext(
+		ctx,
 		requestKey,
 		func() (any, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+
 			if cached, exists := c.dialogueCache.Load(cacheKey); exists {
 				translations, ok := cached.([]string)
 				if !ok {
@@ -219,8 +734,13 @@ func (c *Client) TranslateLines(
 					)
 				}
 
-				c.recordCacheHit(len(lines))
-				return copyStrings(translations), nil
+				c.recordCacheHit(
+					len(lines),
+				)
+
+				return copyStrings(
+					translations,
+				), nil
 			}
 
 			protectedLines, protectedValues := protectLines(
@@ -228,6 +748,7 @@ func (c *Client) TranslateLines(
 			)
 
 			restoredTranslations, err := c.translateProtectedLines(
+				ctx,
 				protectedLines,
 				protectedValues,
 			)
@@ -250,7 +771,12 @@ func (c *Client) TranslateLines(
 				)
 
 				for index, line := range lines {
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
+
 					translation, lineErr := c.translate(
+						ctx,
 						line,
 						false,
 					)
@@ -265,12 +791,28 @@ func (c *Client) TranslateLines(
 					fallbackTranslations[index] = translation
 				}
 
+				if persistErr := c.persistDialogue(
+					cacheKey,
+					fallbackTranslations,
+				); persistErr != nil {
+					return nil, fmt.Errorf(
+						"persist fallback dialogue translation: %w",
+						persistErr,
+					)
+				}
+
 				c.storeDialogueCacheEntry(
 					cacheKey,
 					fallbackTranslations,
 				)
 
-				return copyStrings(fallbackTranslations), nil
+				return copyStrings(
+					fallbackTranslations,
+				), nil
+			}
+
+			if err := ctx.Err(); err != nil {
+				return nil, err
 			}
 
 			if err := c.persistDialogue(
@@ -288,8 +830,13 @@ func (c *Client) TranslateLines(
 				restoredTranslations,
 			)
 
-			c.recordModelTranslatedTexts(len(lines))
-			return copyStrings(restoredTranslations), nil
+			c.recordModelTranslatedTexts(
+				len(lines),
+			)
+
+			return copyStrings(
+				restoredTranslations,
+			), nil
 		},
 	)
 	if err != nil {
@@ -303,14 +850,21 @@ func (c *Client) TranslateLines(
 		)
 	}
 
-	return copyStrings(translations), nil
+	return copyStrings(
+		translations,
+	), nil
 }
 
 func (c *Client) translateProtectedText(
+	ctx context.Context,
 	protected protectedText,
 ) (string, error) {
 	var lastValidationErr error
 	for attempt := 1; attempt <= maxTranslationValidationAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+
 		prompt := c.singleTranslationPrompt
 		if attempt > 1 {
 			prompt = validationRetryPrompt(
@@ -322,6 +876,7 @@ func (c *Client) translateProtectedText(
 
 		var result translationResponse
 		if err := c.chat(
+			ctx,
 			prompt,
 			protected.Text,
 			responseFormat,
@@ -329,6 +884,13 @@ func (c *Client) translateProtectedText(
 			translationNumCtx,
 			&result,
 		); err != nil {
+			if isStructuredResponseError(err) {
+				return "", &translationValidationError{
+					attempts: maxRequestAttempts,
+					err:      err,
+				}
+			}
+
 			return "", err
 		}
 
@@ -343,7 +905,13 @@ func (c *Client) translateProtectedText(
 		lastValidationErr = validationErr
 		if attempt < maxTranslationValidationAttempts {
 			c.recordRetryAttempt()
-			time.Sleep(translationValidationRetryDelay)
+
+			if err := waitForRetry(
+				ctx,
+				translationValidationRetryDelay,
+			); err != nil {
+				return "", err
+			}
 		}
 	}
 
@@ -353,9 +921,46 @@ func (c *Client) translateProtectedText(
 	}
 }
 
-func (c *Client) translateProtectedLines(
+func (c *Client) translateProtectedBatch(
+	ctx context.Context,
 	protectedLines []string,
 	protectedValues []protectedText,
+) ([]string, error) {
+	return c.translateProtectedMultiple(
+		ctx,
+		c.batchTranslationPrompt,
+		protectedLines,
+		protectedValues,
+		translationLinesResponseFormat,
+		batchTranslationNumPredict,
+		translationNumCtx,
+	)
+}
+
+func (c *Client) translateProtectedLines(
+	ctx context.Context,
+	protectedLines []string,
+	protectedValues []protectedText,
+) ([]string, error) {
+	return c.translateProtectedMultiple(
+		ctx,
+		c.dialogueTranslationPrompt,
+		protectedLines,
+		protectedValues,
+		dialogueLinesResponseFormat,
+		dialogueTranslationNumPredict,
+		translationNumCtx,
+	)
+}
+
+func (c *Client) translateProtectedMultiple(
+	ctx context.Context,
+	basePrompt string,
+	protectedLines []string,
+	protectedValues []protectedText,
+	responseSchema json.RawMessage,
+	numPredict int,
+	numCtx int,
 ) ([]string, error) {
 	protectedRequestBody, err := json.Marshal(
 		translationLinesRequest{
@@ -364,17 +969,21 @@ func (c *Client) translateProtectedLines(
 	)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"marshal protected dialogue lines: %w",
+			"marshal protected translation elements: %w",
 			err,
 		)
 	}
 
 	var lastValidationErr error
 	for attempt := 1; attempt <= maxTranslationValidationAttempts; attempt++ {
-		prompt := c.dialogueTranslationPrompt
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		prompt := basePrompt
 		if attempt > 1 {
 			prompt = validationRetryPrompt(
-				c.dialogueTranslationPrompt,
+				basePrompt,
 				lastValidationErr,
 				true,
 			)
@@ -382,13 +991,21 @@ func (c *Client) translateProtectedLines(
 
 		var result translationLinesResponse
 		if err := c.chat(
+			ctx,
 			prompt,
 			string(protectedRequestBody),
-			dialogueLinesResponseFormat,
-			dialogueTranslationNumPredict,
-			translationNumCtx,
+			responseSchema,
+			numPredict,
+			numCtx,
 			&result,
 		); err != nil {
+			if isStructuredResponseError(err) {
+				return nil, &translationValidationError{
+					attempts: maxRequestAttempts,
+					err:      err,
+				}
+			}
+
 			return nil, err
 		}
 
@@ -403,7 +1020,13 @@ func (c *Client) translateProtectedLines(
 		lastValidationErr = validationErr
 		if attempt < maxTranslationValidationAttempts {
 			c.recordRetryAttempt()
-			time.Sleep(translationValidationRetryDelay)
+
+			if err := waitForRetry(
+				ctx,
+				translationValidationRetryDelay,
+			); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -417,7 +1040,9 @@ func validateTranslation(
 	translation string,
 	protected protectedText,
 ) (string, error) {
-	translation = strings.TrimSpace(translation)
+	translation = strings.TrimSpace(
+		translation,
+	)
 
 	if translation == "" {
 		return "", fmt.Errorf(
@@ -454,13 +1079,16 @@ func validateTranslations(
 ) ([]string, error) {
 	if len(translations) != len(protectedValues) {
 		return nil, fmt.Errorf(
-			"Ollama returned %d dialogue lines, expected %d",
+			"Ollama returned %d translation elements, expected %d",
 			len(translations),
 			len(protectedValues),
 		)
 	}
 
-	cleanedTranslations := copyStrings(translations)
+	cleanedTranslations := copyStrings(
+		translations,
+	)
+
 	for index := range cleanedTranslations {
 		cleanedTranslations[index] = strings.TrimSpace(
 			cleanedTranslations[index],
@@ -468,7 +1096,7 @@ func validateTranslations(
 
 		if cleanedTranslations[index] == "" {
 			return nil, fmt.Errorf(
-				"Ollama returned empty dialogue line at index %d",
+				"Ollama returned empty translation element at index %d",
 				index,
 			)
 		}
@@ -480,7 +1108,7 @@ func validateTranslations(
 	)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"restore protected dialogue lines: %w",
+			"restore protected translation elements: %w",
 			err,
 		)
 	}
@@ -492,7 +1120,7 @@ func validateTranslations(
 
 		if restoredTranslations[index] == "" {
 			return nil, fmt.Errorf(
-				"dialogue line %d is empty after restoring protected values",
+				"translation element %d is empty after restoring protected values",
 				index,
 			)
 		}
@@ -542,17 +1170,23 @@ func truncateForLog(
 		return text
 	}
 
-	return string(runes[:maxRunes]) + "…"
+	return string(
+		runes[:maxRunes],
+	) + "…"
 }
 
 func (c *Client) chat(
-	system string,
-	user string,
+	ctx context.Context,
+	system, user string,
 	format json.RawMessage,
-	numPredict int,
-	numCtx int,
+	numPredict, numCtx int,
 	result any,
 ) error {
+	ctx = normalizeContext(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	body, err := json.Marshal(
 		chatRequest{
 			Model:     c.model,
@@ -585,8 +1219,12 @@ func (c *Client) chat(
 	}
 
 	return c.retryOperation(
-		func() error {
+		ctx,
+		func(
+			ctx context.Context,
+		) error {
 			return c.executeChatRequest(
+				ctx,
 				body,
 				result,
 			)
@@ -595,28 +1233,56 @@ func (c *Client) chat(
 }
 
 func (c *Client) executeChatRequest(
+	ctx context.Context,
 	body []byte,
 	result any,
 ) error {
-	c.recordHTTPAttempt()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
+	c.recordHTTPAttempt()
 	startedAt := time.Now()
+
 	request := fasthttp.AcquireRequest()
 	response := fasthttp.AcquireResponse()
 
-	defer fasthttp.ReleaseRequest(request)
-	defer fasthttp.ReleaseResponse(response)
+	defer fasthttp.ReleaseRequest(
+		request,
+	)
 
-	request.Header.SetMethod(fasthttp.MethodPost)
-	request.Header.SetContentType("application/json")
-	request.SetRequestURI(c.baseURL + "/api/chat")
+	defer fasthttp.ReleaseResponse(
+		response,
+	)
+
+	request.Header.SetMethod(
+		fasthttp.MethodPost,
+	)
+
+	request.Header.SetContentType(
+		"application/json",
+	)
+
+	request.SetRequestURI(
+		c.baseURL + "/api/chat",
+	)
+
 	request.SetBody(body)
-
-	if err := c.httpClient.DoTimeout(
+	requestErr := c.httpClient.DoTimeout(
 		request,
 		response,
 		c.timeout,
-	); err != nil {
+	)
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		c.recordFailedHTTPAttempt(
+			time.Since(startedAt),
+		)
+
+		return ctxErr
+	}
+
+	if requestErr != nil {
 		c.recordFailedHTTPAttempt(
 			time.Since(startedAt),
 		)
@@ -624,7 +1290,7 @@ func (c *Client) executeChatRequest(
 		return markRetryable(
 			fmt.Errorf(
 				"request Ollama: %w",
-				err,
+				requestErr,
 			),
 		)
 	}
@@ -638,12 +1304,18 @@ func (c *Client) executeChatRequest(
 			"Ollama returned status %d: %s",
 			response.StatusCode(),
 			strings.TrimSpace(
-				string(response.Body()),
+				string(
+					response.Body(),
+				),
 			),
 		)
 
-		if isRetryableStatus(response.StatusCode()) {
-			return markRetryable(statusErr)
+		if isRetryableStatus(
+			response.StatusCode(),
+		) {
+			return markRetryable(
+				statusErr,
+			)
 		}
 
 		return statusErr
@@ -692,7 +1364,9 @@ func (c *Client) executeChatRequest(
 	}
 
 	if err := json.Unmarshal(
-		[]byte(chatResult.Message.Content),
+		[]byte(
+			chatResult.Message.Content,
+		),
 		result,
 	); err != nil {
 		c.recordFailedHTTPAttempt(
@@ -700,11 +1374,13 @@ func (c *Client) executeChatRequest(
 		)
 
 		return markRetryable(
-			fmt.Errorf(
-				"unmarshal structured response %q: %w",
-				chatResult.Message.Content,
-				err,
-			),
+			&structuredResponseError{
+				content: truncateForLog(
+					chatResult.Message.Content,
+					300,
+				),
+				err: err,
+			},
 		)
 	}
 
@@ -716,6 +1392,62 @@ func (c *Client) executeChatRequest(
 	return nil
 }
 
+func (c *Client) doSingleflightContext(
+	ctx context.Context,
+	key string,
+	operation func() (any, error),
+) (
+	any,
+	error,
+	bool,
+) {
+	ctx = normalizeContext(ctx)
+	resultChannel := c.requestGroup.DoChan(
+		key,
+		operation,
+	)
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err(), false
+
+	case result := <-resultChannel:
+		return result.Val, result.Err, result.Shared
+	}
+}
+
+func normalizeContext(
+	ctx context.Context,
+) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+
+	return ctx
+}
+
+func (e *structuredResponseError) Error() string {
+	return fmt.Sprintf(
+		"unmarshal structured response %q: %v",
+		e.content,
+		e.err,
+	)
+}
+
+func (e *structuredResponseError) Unwrap() error {
+	return e.err
+}
+
+func isStructuredResponseError(
+	err error,
+) bool {
+	var target *structuredResponseError
+	return errors.As(
+		err,
+		&target,
+	)
+}
+
 func copyStrings(
 	values []string,
 ) []string {
@@ -724,7 +1456,11 @@ func copyStrings(
 		len(values),
 	)
 
-	copy(result, values)
+	copy(
+		result,
+		values,
+	)
+
 	return result
 }
 
@@ -744,5 +1480,9 @@ func isTranslationValidationError(
 	err error,
 ) bool {
 	var target *translationValidationError
-	return errors.As(err, &target)
+
+	return errors.As(
+		err,
+		&target,
+	)
 }
