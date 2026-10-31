@@ -65,8 +65,6 @@ func (c *Client) retryOperation(
 		}
 
 		if attempt > 0 {
-			c.recordRetryAttempt()
-
 			if err := waitForRetry(
 				ctx,
 				requestRetryDelays[attempt],

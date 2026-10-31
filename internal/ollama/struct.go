@@ -27,7 +27,6 @@ type Client struct {
 	requestGroup              singleflight.Group
 	cachePath                 string
 	cacheFileMu               sync.Mutex
-	metrics                   clientMetrics
 }
 
 type message struct {

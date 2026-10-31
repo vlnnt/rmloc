@@ -116,10 +116,6 @@ func (c *Client) translate(
 		return "", err
 	}
 
-	if recordInput {
-		c.recordInputTexts(1)
-	}
-
 	if strings.TrimSpace(text) == "" {
 		return "", fmt.Errorf(
 			"text is empty",
@@ -127,7 +123,6 @@ func (c *Client) translate(
 	}
 
 	if !needsTranslation(text) {
-		c.recordSkippedTexts(1)
 
 		return text, nil
 	}
@@ -140,7 +135,6 @@ func (c *Client) translate(
 			)
 		}
 
-		c.recordCacheHit(1)
 		return translation, nil
 	}
 
@@ -161,7 +155,6 @@ func (c *Client) translate(
 					)
 				}
 
-				c.recordCacheHit(1)
 				return translation, nil
 			}
 
@@ -190,7 +183,6 @@ func (c *Client) translate(
 					text,
 				)
 
-				c.recordSafetyFallback(1)
 				fmt.Printf(
 					"Warning: the text could not be translated safely; "+
 						"the original text was left unchanged. "+
@@ -224,7 +216,6 @@ func (c *Client) translate(
 				restoredTranslation,
 			)
 
-			c.recordModelTranslatedTexts(1)
 			return restoredTranslation, nil
 		},
 	)
@@ -261,10 +252,6 @@ func (c *Client) TranslateBatchContext(
 		return nil, err
 	}
 
-	c.recordInputTexts(
-		len(texts),
-	)
-
 	if len(texts) == 0 {
 		return nil, fmt.Errorf(
 			"texts are empty",
@@ -289,12 +276,12 @@ func (c *Client) TranslateBatchContext(
 		}
 
 		if strings.TrimSpace(text) == "" {
-			c.recordSkippedTexts(1)
+
 			continue
 		}
 
 		if !needsTranslation(text) {
-			c.recordSkippedTexts(1)
+
 			continue
 		}
 
@@ -307,7 +294,7 @@ func (c *Client) TranslateBatchContext(
 			}
 
 			result[index] = translation
-			c.recordCacheHit(1)
+
 			continue
 		}
 
@@ -371,11 +358,6 @@ func (c *Client) TranslateBatchContext(
 			result[resultIndex] = translation
 		}
 
-		if len(entry.indexes) > 1 {
-			c.recordCacheHit(
-				len(entry.indexes) - 1,
-			)
-		}
 	}
 
 	return result, nil
@@ -502,7 +484,6 @@ func (c *Client) translateBatchChunk(
 			}
 
 			result[index] = translation
-			c.recordCacheHit(1)
 
 			continue
 		}
@@ -638,10 +619,6 @@ func (c *Client) translateBatchRequest(
 		)
 	}
 
-	c.recordModelTranslatedTexts(
-		len(texts),
-	)
-
 	return copyStrings(
 		restoredTranslations,
 	), nil
@@ -666,10 +643,6 @@ func (c *Client) TranslateLinesContext(
 		return nil, err
 	}
 
-	c.recordInputTexts(
-		len(lines),
-	)
-
 	if len(lines) == 0 {
 		return nil, fmt.Errorf(
 			"lines are empty",
@@ -677,9 +650,6 @@ func (c *Client) TranslateLinesContext(
 	}
 
 	if !needsAnyTranslation(lines) {
-		c.recordSkippedTexts(
-			len(lines),
-		)
 
 		return copyStrings(lines), nil
 	}
@@ -708,10 +678,6 @@ func (c *Client) TranslateLinesContext(
 			)
 		}
 
-		c.recordCacheHit(
-			len(lines),
-		)
-
 		return copyStrings(
 			translations,
 		), nil
@@ -733,10 +699,6 @@ func (c *Client) TranslateLinesContext(
 						"invalid cached dialogue translation type",
 					)
 				}
-
-				c.recordCacheHit(
-					len(lines),
-				)
 
 				return copyStrings(
 					translations,
@@ -830,10 +792,6 @@ func (c *Client) TranslateLinesContext(
 				restoredTranslations,
 			)
 
-			c.recordModelTranslatedTexts(
-				len(lines),
-			)
-
 			return copyStrings(
 				restoredTranslations,
 			), nil
@@ -904,7 +862,6 @@ func (c *Client) translateProtectedText(
 
 		lastValidationErr = validationErr
 		if attempt < maxTranslationValidationAttempts {
-			c.recordRetryAttempt()
 
 			if err := waitForRetry(
 				ctx,
@@ -1019,7 +976,6 @@ func (c *Client) translateProtectedMultiple(
 
 		lastValidationErr = validationErr
 		if attempt < maxTranslationValidationAttempts {
-			c.recordRetryAttempt()
 
 			if err := waitForRetry(
 				ctx,
@@ -1241,9 +1197,6 @@ func (c *Client) executeChatRequest(
 		return err
 	}
 
-	c.recordHTTPAttempt()
-	startedAt := time.Now()
-
 	request := fasthttp.AcquireRequest()
 	response := fasthttp.AcquireResponse()
 
@@ -1275,17 +1228,11 @@ func (c *Client) executeChatRequest(
 	)
 
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
 
 		return ctxErr
 	}
 
 	if requestErr != nil {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
 
 		return markRetryable(
 			fmt.Errorf(
@@ -1296,9 +1243,6 @@ func (c *Client) executeChatRequest(
 	}
 
 	if response.StatusCode() != fasthttp.StatusOK {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
 
 		statusErr := fmt.Errorf(
 			"Ollama returned status %d: %s",
@@ -1326,9 +1270,6 @@ func (c *Client) executeChatRequest(
 		response.Body(),
 		&chatResult,
 	); err != nil {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
 
 		return markRetryable(
 			fmt.Errorf(
@@ -1339,9 +1280,6 @@ func (c *Client) executeChatRequest(
 	}
 
 	if chatResult.Error != "" {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
 
 		return fmt.Errorf(
 			"Ollama error: %s",
@@ -1352,9 +1290,6 @@ func (c *Client) executeChatRequest(
 	if strings.TrimSpace(
 		chatResult.Message.Content,
 	) == "" {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
 
 		return markRetryable(
 			fmt.Errorf(
@@ -1369,9 +1304,6 @@ func (c *Client) executeChatRequest(
 		),
 		result,
 	); err != nil {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
 
 		return markRetryable(
 			&structuredResponseError{
@@ -1383,11 +1315,6 @@ func (c *Client) executeChatRequest(
 			},
 		)
 	}
-
-	c.recordSuccessfulHTTPResponse(
-		chatResult,
-		time.Since(startedAt),
-	)
 
 	return nil
 }
