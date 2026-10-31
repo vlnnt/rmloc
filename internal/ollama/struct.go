@@ -6,27 +6,22 @@ import (
 	"time"
 
 	"github.com/valyala/fasthttp"
-	"golang.org/x/sync/singleflight"
 )
 
 type Client struct {
-	baseURL                   string
-	model                     string
-	singleTranslationPrompt   string
-	batchTranslationPrompt    string
-	dialogueTranslationPrompt string
-	legacyPromptHash          string
-	singlePromptHash          string
-	batchPromptHash           string
-	dialoguePromptHash        string
-	allowLegacyCache          bool
-	httpClient                *fasthttp.Client
-	timeout                   time.Duration
-	translationCache          sync.Map
-	dialogueCache             sync.Map
-	requestGroup              singleflight.Group
-	cachePath                 string
-	cacheFileMu               sync.Mutex
+	baseURL    string
+	model      string
+	prompt     string
+	promptHash string
+
+	httpClient *fasthttp.Client
+	timeout    time.Duration
+
+	translationCache sync.Map
+	dialogueCache    sync.Map
+
+	cachePath   string
+	cacheFileMu sync.Mutex
 }
 
 type message struct {
@@ -51,14 +46,8 @@ type chatRequest struct {
 }
 
 type chatResponse struct {
-	Message            message `json:"message"`
-	Error              string  `json:"error"`
-	TotalDuration      int64   `json:"total_duration"`
-	LoadDuration       int64   `json:"load_duration"`
-	PromptEvalCount    int     `json:"prompt_eval_count"`
-	PromptEvalDuration int64   `json:"prompt_eval_duration"`
-	EvalCount          int     `json:"eval_count"`
-	EvalDuration       int64   `json:"eval_duration"`
+	Message message `json:"message"`
+	Error   string  `json:"error"`
 }
 
 type translationResponse struct {
@@ -74,27 +63,10 @@ type translationLinesResponse struct {
 }
 
 type persistentCacheEntry struct {
-	Version      int      `json:"version"`
 	Model        string   `json:"model"`
-	PromptMode   string   `json:"prompt_mode,omitempty"`
-	PromptHash   string   `json:"prompt_hash,omitempty"`
+	PromptHash   string   `json:"prompt_hash"`
 	Kind         string   `json:"kind"`
 	Key          string   `json:"key"`
 	Translation  string   `json:"translation,omitempty"`
 	Translations []string `json:"translations,omitempty"`
-}
-
-type translationValidationError struct {
-	attempts int
-	err      error
-}
-
-type structuredResponseError struct {
-	content string
-	err     error
-}
-
-type batchTextEntry struct {
-	text    string
-	indexes []int
 }

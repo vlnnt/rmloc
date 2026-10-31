@@ -170,7 +170,7 @@ func (a *RmmzEngine) ProcessMapContext(
 			text.Text,
 		)
 
-		translated, err := a.ollamaClient.TranslateContext(
+		translated, err := a.ollamaClient.Translate(
 			ctx,
 			text.Text,
 		)
@@ -385,7 +385,7 @@ func (a *RmmzEngine) translateMapTextBlock(
 		len(lines),
 	)
 
-	translatedLines, err := a.ollamaClient.TranslateLinesContext(
+	translatedLines, err := a.ollamaClient.TranslateLines(
 		ctx,
 		lines,
 	)

@@ -9,262 +9,114 @@ import (
 	"strings"
 )
 
-const translationCacheVersion = 3
-
 const (
 	cacheKindTranslation = "translation"
 	cacheKindDialogue    = "dialogue"
 )
 
-const (
-	promptModeSingle   = "single"
-	promptModeBatch    = "batch"
-	promptModeDialogue = "dialogue"
-)
-
 func (c *Client) EnablePersistentCache(
 	cachePath string,
 ) error {
-	cachePath = strings.TrimSpace(cachePath)
-	if cachePath == "" {
+	if strings.TrimSpace(cachePath) == "" {
 		return fmt.Errorf("cache path is empty")
 	}
 
-	absolutePath, err := filepath.Abs(cachePath)
+	path, err := filepath.Abs(cachePath)
 	if err != nil {
-		return fmt.Errorf(
-			"resolve cache path: %w",
-			err,
-		)
+		return fmt.Errorf("resolve cache path: %w", err)
 	}
 
-	if err := os.MkdirAll(
-		filepath.Dir(absolutePath),
-		0o755,
-	); err != nil {
-		return fmt.Errorf(
-			"create cache directory: %w",
-			err,
-		)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create cache directory: %w", err)
 	}
 
 	c.cacheFileMu.Lock()
 	defer c.cacheFileMu.Unlock()
 
-	c.cachePath = absolutePath
-	file, err := os.Open(absolutePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-
-		return fmt.Errorf(
-			"open translation cache: %w",
-			err,
-		)
+	file, err := os.Open(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("open translation cache: %w", err)
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(
-		make([]byte, 64*1024),
-		4*1024*1024,
-	)
+	if err == nil {
+		defer file.Close()
 
-	loadedEntries := 0
-	loadedAliases := 0
+		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(
-			scanner.Text(),
-		)
-		if line == "" {
-			continue
-		}
-
-		var entry persistentCacheEntry
-		if err := json.Unmarshal(
-			[]byte(line),
-			&entry,
-		); err != nil {
-			continue
-		}
-
-		if entry.Model != c.model {
-			continue
-		}
-
-		if !c.matchesPersistentCacheEntry(
-			entry,
-		) {
-			continue
-		}
-
-		switch entry.Kind {
-		case cacheKindTranslation:
-			if entry.Key == "" ||
-				strings.TrimSpace(
-					entry.Translation,
-				) == "" {
+		for scanner.Scan() {
+			var entry persistentCacheEntry
+			if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
 				continue
 			}
 
-			c.storeTranslationCacheEntry(
-				entry.Key,
-				entry.Translation,
-			)
-
-			loadedEntries++
-			if entry.Key != entry.Translation {
-				loadedAliases++
-			}
-
-		case cacheKindDialogue:
-			if entry.Key == "" ||
-				len(entry.Translations) == 0 {
+			if entry.Model != c.model ||
+				entry.PromptHash != c.promptHash {
 				continue
 			}
 
-			valid := true
-			for _, translation := range entry.Translations {
-				if strings.TrimSpace(
-					translation,
-				) == "" {
-					valid = false
-					break
+			switch entry.Kind {
+			case cacheKindTranslation:
+				if entry.Key == "" || strings.TrimSpace(entry.Translation) == "" {
+					continue
+				}
+
+				c.storeTranslationCacheEntry(entry.Key, entry.Translation)
+
+			case cacheKindDialogue:
+				if entry.Key == "" || len(entry.Translations) == 0 {
+					continue
+				}
+
+				valid := true
+				for _, translation := range entry.Translations {
+					if strings.TrimSpace(translation) == "" {
+						valid = false
+						break
+					}
+				}
+
+				if valid {
+					c.storeDialogueCacheEntry(
+						entry.Key,
+						entry.Translations,
+					)
 				}
 			}
+		}
 
-			if !valid {
-				continue
-			}
-
-			translatedKey := c.storeDialogueCacheEntry(
-				entry.Key,
-				entry.Translations,
-			)
-
-			loadedEntries++
-			if translatedKey != entry.Key {
-				loadedAliases++
-			}
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("read translation cache: %w", err)
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf(
-			"read translation cache: %w",
-			err,
-		)
-	}
-
-	fmt.Printf(
-		"Loaded cache entries: %d; translated-text aliases: %d\n",
-		loadedEntries,
-		loadedAliases,
-	)
-
+	c.cachePath = path
 	return nil
-}
-
-func (c *Client) matchesPersistentCacheEntry(
-	entry persistentCacheEntry,
-) bool {
-	switch entry.Version {
-	case legacyTranslationCacheVersion:
-		return c.allowLegacyCache
-
-	case 2:
-		return entry.PromptHash ==
-			c.legacyPromptHash
-
-	case translationCacheVersion:
-		return c.matchesCurrentPrompt(
-			entry.PromptMode,
-			entry.PromptHash,
-			entry.Kind,
-		)
-
-	default:
-		return false
-	}
-}
-
-func (c *Client) matchesCurrentPrompt(
-	mode, hash, kind string,
-) bool {
-	switch mode {
-	case promptModeSingle:
-		return kind == cacheKindTranslation &&
-			hash == c.singlePromptHash
-
-	case promptModeBatch:
-		return kind == cacheKindTranslation &&
-			hash == c.batchPromptHash
-
-	case promptModeDialogue:
-		return kind == cacheKindDialogue &&
-			hash == c.dialoguePromptHash
-
-	default:
-		return false
-	}
 }
 
 func (c *Client) persistTranslation(
 	key, translation string,
 ) error {
-	return c.persistTranslationForMode(
-		promptModeSingle,
-		c.singlePromptHash,
-		key,
-		translation,
-	)
-}
-
-func (c *Client) persistBatchTranslation(
-	key string,
-	translation string,
-) error {
-	return c.persistTranslationForMode(
-		promptModeBatch,
-		c.batchPromptHash,
-		key,
-		translation,
-	)
-}
-
-func (c *Client) persistTranslationForMode(
-	mode, promptHash, key, translation string,
-) error {
-	return c.appendPersistentCacheEntry(
-		persistentCacheEntry{
-			Version:     translationCacheVersion,
-			Model:       c.model,
-			PromptMode:  mode,
-			PromptHash:  promptHash,
-			Kind:        cacheKindTranslation,
-			Key:         key,
-			Translation: translation,
-		},
-	)
+	return c.appendPersistentCacheEntry(persistentCacheEntry{
+		Model:       c.model,
+		PromptHash:  c.promptHash,
+		Kind:        cacheKindTranslation,
+		Key:         key,
+		Translation: translation,
+	})
 }
 
 func (c *Client) persistDialogue(
 	key string,
 	translations []string,
 ) error {
-	return c.appendPersistentCacheEntry(
-		persistentCacheEntry{
-			Version:      translationCacheVersion,
-			Model:        c.model,
-			PromptMode:   promptModeDialogue,
-			PromptHash:   c.dialoguePromptHash,
-			Kind:         cacheKindDialogue,
-			Key:          key,
-			Translations: copyStrings(translations),
-		},
-	)
+	return c.appendPersistentCacheEntry(persistentCacheEntry{
+		Model:        c.model,
+		PromptHash:   c.promptHash,
+		Kind:         cacheKindDialogue,
+		Key:          key,
+		Translations: copyStrings(translations),
+	})
 }
 
 func (c *Client) appendPersistentCacheEntry(
@@ -283,78 +135,33 @@ func (c *Client) appendPersistentCacheEntry(
 		0o644,
 	)
 	if err != nil {
-		return fmt.Errorf(
-			"open translation cache for writing: %w",
-			err,
-		)
+		return fmt.Errorf("open translation cache for writing: %w", err)
 	}
 
 	encoder := json.NewEncoder(file)
 	encoder.SetEscapeHTML(false)
 
 	if err := encoder.Encode(entry); err != nil {
-		file.Close()
-
-		return fmt.Errorf(
-			"write translation cache: %w",
-			err,
-		)
+		_ = file.Close()
+		return fmt.Errorf("write cache entry: %w", err)
 	}
 
 	if err := file.Close(); err != nil {
-		return fmt.Errorf(
-			"close translation cache: %w",
-			err,
-		)
+		return fmt.Errorf("close translation cache: %w", err)
 	}
 
 	return nil
 }
 
 func (c *Client) storeTranslationCacheEntry(
-	key string,
-	translation string,
+	key, translation string,
 ) {
-	c.translationCache.Store(
-		key,
-		translation,
-	)
-
-	c.translationCache.Store(
-		translation,
-		translation,
-	)
+	c.translationCache.Store(key, translation)
 }
 
 func (c *Client) storeDialogueCacheEntry(
 	key string,
 	translations []string,
-) string {
-	c.dialogueCache.Store(
-		key,
-		copyStrings(translations),
-	)
-
-	translatedKey := dialogueCacheKey(
-		translations,
-	)
-
-	c.dialogueCache.Store(
-		translatedKey,
-		copyStrings(translations),
-	)
-
-	return translatedKey
-}
-
-func dialogueCacheKey(
-	lines []string,
-) string {
-	body, _ := json.Marshal(
-		translationLinesRequest{
-			Lines: lines,
-		},
-	)
-
-	return string(body)
+) {
+	c.dialogueCache.Store(key, copyStrings(translations))
 }

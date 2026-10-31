@@ -63,7 +63,7 @@ func translateTextEntries[T any](
 			)
 		}
 
-		translations, err := client.TranslateBatchContext(
+		translations, err := client.TranslateBatch(
 			ctx,
 			sourceTexts,
 		)

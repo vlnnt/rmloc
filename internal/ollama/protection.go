@@ -34,10 +34,7 @@ func protectText(
 	text string,
 ) protectedText {
 	namespace := "RMLOC"
-	for strings.Contains(
-		text,
-		"⟦"+namespace+"_",
-	) {
+	for strings.Contains(text, "⟦"+namespace+"_") {
 		namespace += "X"
 	}
 
@@ -51,13 +48,10 @@ func protectText(
 				len(fragments),
 			)
 
-			fragments = append(
-				fragments,
-				protectedFragment{
-					Marker:   marker,
-					Original: original,
-				},
-			)
+			fragments = append(fragments, protectedFragment{
+				Marker:   marker,
+				Original: original,
+			})
 
 			return marker
 		},
@@ -73,108 +67,44 @@ func protectText(
 func (p protectedText) restore(
 	translated string,
 ) (string, error) {
-	if len(p.fragments) == 0 {
-		return translated, nil
-	}
-
-	expectedMarkers := make(
-		map[string]struct{},
-		len(p.fragments),
-	)
-
 	for _, fragment := range p.fragments {
-		expectedMarkers[fragment.Marker] = struct{}{}
-		count := strings.Count(
-			translated,
-			fragment.Marker,
-		)
-
+		count := strings.Count(translated, fragment.Marker)
 		if count != 1 {
 			return "", fmt.Errorf(
-				"protected marker %q occurs %d times, expected exactly once",
+				"protected marker %q occurs %d times, expected 1",
 				fragment.Marker,
 				count,
 			)
 		}
 	}
 
-	markerPattern := regexp.MustCompile(
-		regexp.QuoteMeta(
-			"⟦"+p.namespace+"_",
-		) + `[0-9]+⟧`,
-	)
-
-	for _, marker := range markerPattern.FindAllString(
-		translated,
-		-1,
-	) {
-		if _, exists := expectedMarkers[marker]; !exists {
-			return "", fmt.Errorf(
-				"unexpected protected marker %q",
-				marker,
-			)
-		}
-	}
-
-	result := translated
 	for _, fragment := range p.fragments {
-		result = strings.ReplaceAll(
-			result,
+		translated = strings.Replace(
+			translated,
 			fragment.Marker,
 			fragment.Original,
+			1,
 		)
 	}
 
-	return result, nil
+	if len(p.fragments) > 0 &&
+		strings.Contains(translated, "⟦"+p.namespace+"_") {
+		return "", fmt.Errorf("unexpected protected marker in translation")
+	}
+
+	return translated, nil
 }
 
 func protectLines(
 	lines []string,
 ) ([]string, []protectedText) {
-	protectedLines := make(
-		[]string,
-		len(lines),
-	)
+	texts := make([]string, len(lines))
+	protected := make([]protectedText, len(lines))
 
-	protectedValues := make(
-		[]protectedText,
-		len(lines),
-	)
-
-	for index, line := range lines {
-		protected := protectText(line)
-		protectedLines[index] = protected.Text
-		protectedValues[index] = protected
+	for i, line := range lines {
+		protected[i] = protectText(line)
+		texts[i] = protected[i].Text
 	}
 
-	return protectedLines, protectedValues
-}
-
-func restoreLines(
-	translatedLines []string,
-	protectedValues []protectedText,
-) ([]string, error) {
-	if len(translatedLines) != len(protectedValues) {
-		return nil, fmt.Errorf(
-			"translated lines count %d does not match protected lines count %d",
-			len(translatedLines),
-			len(protectedValues),
-		)
-	}
-
-	result := make([]string, len(translatedLines))
-	for index, translated := range translatedLines {
-		restored, err := protectedValues[index].restore(translated)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"restore protected values in line %d: %w",
-				index,
-				err,
-			)
-		}
-
-		result[index] = restored
-	}
-
-	return result, nil
+	return texts, protected
 }
