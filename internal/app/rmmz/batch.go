@@ -43,30 +43,20 @@ func translateTextEntries[T any](
 		}
 
 		end := start + databaseTranslationBatchSize
-
 		if end > len(entries) {
 			end = len(entries)
 		}
 
-		sourceTexts := make(
-			[]string,
-			end-start,
-		)
-
+		sourceTexts := make([]string, end-start)
 		for index := start; index < end; index++ {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 
-			sourceTexts[index-start] = getText(
-				&entries[index],
-			)
+			sourceTexts[index-start] = getText(&entries[index])
 		}
 
-		translations, err := client.TranslateBatch(
-			ctx,
-			sourceTexts,
-		)
+		translations, err := client.TranslateBatch(ctx, sourceTexts)
 		if err != nil {
 			return fmt.Errorf(
 				"translate text entries %d-%d of %d: %w",
@@ -93,30 +83,19 @@ func translateTextEntries[T any](
 			}
 
 			entryIndex := start + offset
-			translation = strings.TrimSpace(
-				translation,
-			)
-
+			translation = strings.TrimSpace(translation)
 			if translation == "" {
 				return fmt.Errorf(
 					"empty translation for entry %d: %s",
 					entryIndex,
-					describe(
-						&entries[entryIndex],
-					),
+					describe(&entries[entryIndex]),
 				)
 			}
 
-			setText(
-				&entries[entryIndex],
-				translation,
-			)
+			setText(&entries[entryIndex], translation)
 		}
 
-		reporter.FileAdvanced(
-			filePath,
-			end-start,
-		)
+		reporter.FileAdvanced(filePath, end-start)
 	}
 
 	return nil

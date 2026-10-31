@@ -25,25 +25,11 @@ func Extract(
 			continue
 		}
 
-		texts = appendStateText(
-			texts, state.ID, stateIndex, "name", state.Name,
-		)
-
-		texts = appendStateText(
-			texts, state.ID, stateIndex, "message1", state.Message1,
-		)
-
-		texts = appendStateText(
-			texts, state.ID, stateIndex, "message2", state.Message2,
-		)
-
-		texts = appendStateText(
-			texts, state.ID, stateIndex, "message3", state.Message3,
-		)
-
-		texts = appendStateText(
-			texts, state.ID, stateIndex, "message4", state.Message4,
-		)
+		texts = appendStateText(texts, state.ID, stateIndex, "name", state.Name)
+		texts = appendStateText(texts, state.ID, stateIndex, "message1", state.Message1)
+		texts = appendStateText(texts, state.ID, stateIndex, "message2", state.Message2)
+		texts = appendStateText(texts, state.ID, stateIndex, "message3", state.Message3)
+		texts = appendStateText(texts, state.ID, stateIndex, "message4", state.Message4)
 	}
 
 	return texts, nil

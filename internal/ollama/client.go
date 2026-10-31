@@ -3,6 +3,7 @@ package ollama
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -120,7 +121,13 @@ func (c *Client) Translate(
 		return translated, nil
 	}
 
-	return "", fmt.Errorf("translation validation failed: %w", lastErr)
+	fmt.Printf(
+		"Warning: translation failed for %q: %v. Keeping original.\n",
+		text,
+		lastErr,
+	)
+
+	return text, nil
 }
 
 func (c *Client) TranslateBatch(
@@ -310,7 +317,13 @@ func (c *Client) translateMultiple(
 			multipleNumPredict,
 			&response,
 		); err != nil {
-			return nil, err
+			var syntaxErr *json.SyntaxError
+			if !errors.As(err, &syntaxErr) {
+				return nil, err
+			}
+
+			lastErr = err
+			break
 		}
 
 		if len(response.Translations) != len(lines) {

@@ -19,59 +19,48 @@ import (
 )
 
 const (
-	settingsPageName = "settings"
-	progressPageName = "progress"
-	exitPageName     = "exit"
-
-	defaultOllamaURL = "http://localhost:11434"
-	defaultModel     = "qwen2.5:1.5b"
-	defaultWorkers   = 2
-
+	settingsPageName  = "settings"
+	progressPageName  = "progress"
+	exitPageName      = "exit"
+	defaultOllamaURL  = "http://localhost:11434"
+	defaultModel      = "qwen2.5:1.5b"
+	defaultWorkers    = 2
 	uiRefreshInterval = 150 * time.Millisecond
 	progressBarWidth  = 32
 )
 
 type UI struct {
-	application *tview.Application
-	pages       *tview.Pages
-
+	application    *tview.Application
+	pages          *tview.Pages
 	settingsRoot   *tview.Flex
 	settingsForm   *tview.Form
 	settingsStatus *tview.TextView
-
-	gameDirInput *tview.InputField
-	ollamaInput  *tview.InputField
-	modelInput   *tview.InputField
-	promptInput  *tview.InputField
-	workersInput *tview.InputField
-
-	progressRoot *tview.Flex
-	header       *tview.TextView
-	summary      *tview.TextView
-	fileTable    *tview.Table
-	status       *tview.TextView
-	buttons      *tview.Form
-
+	gameDirInput   *tview.InputField
+	ollamaInput    *tview.InputField
+	modelInput     *tview.InputField
+	promptInput    *tview.InputField
+	workersInput   *tview.InputField
+	progressRoot   *tview.Flex
+	header         *tview.TextView
+	summary        *tview.TextView
+	fileTable      *tview.Table
+	status         *tview.TextView
+	buttons        *tview.Form
 	restartButton  *tview.Button
 	stopButton     *tview.Button
 	settingsButton *tview.Button
 	exitButton     *tview.Button
-
-	state      *State
-	controller *Controller
-	config     Config
-
-	currentPage string
-
-	message      string
-	messageColor string
-
+	state          *State
+	controller     *Controller
+	config         Config
+	currentPage    string
+	message        string
+	messageColor   string
 	exitDialogOpen bool
 	exitAfterStop  bool
-
-	closed      chan struct{}
-	closeOnce   sync.Once
-	refreshOnce sync.Once
+	closed         chan struct{}
+	closeOnce      sync.Once
+	refreshOnce    sync.Once
 }
 
 func Run() error {
@@ -81,14 +70,12 @@ func Run() error {
 
 func NewUI() *UI {
 	ui := &UI{
-		application: tview.NewApplication(),
-		state:       NewState(),
-		currentPage: settingsPageName,
-
+		application:  tview.NewApplication(),
+		state:        NewState(),
+		currentPage:  settingsPageName,
 		message:      "Ready to start translation.",
 		messageColor: "green",
-
-		closed: make(chan struct{}),
+		closed:       make(chan struct{}),
 	}
 
 	ui.build()
@@ -97,23 +84,12 @@ func NewUI() *UI {
 
 func (u *UI) Run() error {
 	u.application.EnableMouse(true)
-	u.application.SetRoot(
-		u.pages,
-		true,
-	)
-
-	u.application.SetFocus(
-		u.gameDirInput,
-	)
-
-	u.application.SetInputCapture(
-		u.captureInput,
-	)
+	u.application.SetRoot(u.pages, true)
+	u.application.SetFocus(u.gameDirInput)
+	u.application.SetInputCapture(u.captureInput)
 
 	u.startRefreshLoop()
-	runErr := runTviewApplication(
-		u.application,
-	)
+	runErr := runTviewApplication(u.application)
 
 	if u.controller != nil &&
 		u.controller.IsRunning() {
@@ -121,7 +97,6 @@ func (u *UI) Run() error {
 	}
 
 	u.close()
-
 	return runErr
 }
 
@@ -212,16 +187,10 @@ func (u *UI) buildSettingsPage() {
 		u.requestExit,
 	)
 
-	u.settingsForm.SetButtonsAlign(
-		tview.AlignCenter,
-	)
-
+	u.settingsForm.SetButtonsAlign(tview.AlignCenter)
 	u.settingsForm.SetBorder(true)
 	u.settingsForm.SetTitle(" Settings ")
-
-	u.settingsForm.SetCancelFunc(
-		u.requestExit,
-	)
+	u.settingsForm.SetCancelFunc(u.requestExit)
 
 	u.settingsStatus = tview.NewTextView().
 		SetDynamicColors(true).
@@ -351,9 +320,7 @@ func (u *UI) restartTranslation() {
 		return
 	}
 
-	u.startWithConfig(
-		u.config,
-	)
+	u.startWithConfig(u.config)
 }
 
 func (u *UI) startWithConfig(
@@ -377,10 +344,7 @@ func (u *UI) startWithConfig(
 	controller, preparedConfig, err := createController(config)
 	if err != nil {
 		u.setSettingsMessage(
-			fmt.Sprintf(
-				"Error: %v",
-				err,
-			),
+			fmt.Sprintf("Error: %v", err),
 			"red",
 		)
 
@@ -397,9 +361,7 @@ func (u *UI) startWithConfig(
 	)
 
 	u.openProgress()
-	done, err := u.controller.Start(
-		u.config.GameDir,
-	)
+	done, err := u.controller.Start(u.config.GameDir)
 	if err != nil {
 		u.setMessage(
 			fmt.Sprintf(
@@ -419,56 +381,36 @@ func (u *UI) startWithConfig(
 	)
 
 	u.renderProgress()
-	go u.waitForResult(
-		done,
-	)
+	go u.waitForResult(done)
 }
 
 func createController(
 	config Config,
-) (
-	*Controller,
-	Config,
-	error,
-) {
+) (*Controller, Config, error) {
 	config = config.Normalized()
 	if err := config.Validate(); err != nil {
 		return nil, Config{}, err
 	}
 
-	promptConfig, err := ollama.LoadPromptConfig(
-		config.PromptPath,
-	)
+	promptConfig, err := ollama.LoadPromptConfig(config.PromptPath)
 	if err != nil {
-		return nil, Config{}, fmt.Errorf(
-			"load prompt: %w",
-			err,
-		)
+		return nil, Config{}, fmt.Errorf("load prompt: %w", err)
 	}
 
-	config.PromptName = strings.TrimSpace(
-		promptConfig.Name,
-	)
-
+	config.PromptName = strings.TrimSpace(promptConfig.Name)
 	ollamaClient, err := ollama.NewClient(
 		config.OllamaURL,
 		config.Model,
 		promptConfig,
 	)
 	if err != nil {
-		return nil, Config{}, fmt.Errorf(
-			"create Ollama client: %w",
-			err,
-		)
+		return nil, Config{}, fmt.Errorf("create Ollama client: %w", err)
 	}
 
 	if err := ollamaClient.EnablePersistentCache(
 		config.CachePath,
 	); err != nil {
-		return nil, Config{}, fmt.Errorf(
-			"open translation cache: %w",
-			err,
-		)
+		return nil, Config{}, fmt.Errorf("open translation cache: %w", err)
 	}
 
 	state := NewState()
@@ -490,38 +432,20 @@ func createController(
 	return controller, config, nil
 }
 
-func (u *UI) readSettings() (
-	Config,
-	error,
-) {
-	gameDir := strings.TrimSpace(
-		u.gameDirInput.GetText(),
-	)
-
+func (u *UI) readSettings() (Config, error) {
+	gameDir := strings.TrimSpace(u.gameDirInput.GetText())
 	if gameDir == "" {
-		return Config{}, fmt.Errorf(
-			"game folder is not specified",
-		)
+		return Config{}, fmt.Errorf("game folder is not specified")
 	}
 
-	absoluteGameDir, err := filepath.Abs(
-		gameDir,
-	)
+	absoluteGameDir, err := filepath.Abs(gameDir)
 	if err != nil {
-		return Config{}, fmt.Errorf(
-			"resolve game path: %w",
-			err,
-		)
+		return Config{}, fmt.Errorf("resolve game path: %w", err)
 	}
 
-	gameInfo, err := os.Stat(
-		absoluteGameDir,
-	)
+	gameInfo, err := os.Stat(absoluteGameDir)
 	if err != nil {
-		return Config{}, fmt.Errorf(
-			"open game folder: %w",
-			err,
-		)
+		return Config{}, fmt.Errorf("open game folder: %w", err)
 	}
 
 	if !gameInfo.IsDir() {
@@ -531,54 +455,29 @@ func (u *UI) readSettings() (
 		)
 	}
 
-	ollamaURL := strings.TrimSpace(
-		u.ollamaInput.GetText(),
-	)
-
+	ollamaURL := strings.TrimSpace(u.ollamaInput.GetText())
 	if ollamaURL == "" {
-		return Config{}, fmt.Errorf(
-			"Ollama address is not specified",
-		)
+		return Config{}, fmt.Errorf("Ollama address is not specified")
 	}
 
-	model := strings.TrimSpace(
-		u.modelInput.GetText(),
-	)
-
+	model := strings.TrimSpace(u.modelInput.GetText())
 	if model == "" {
-		return Config{}, fmt.Errorf(
-			"Ollama model is not specified",
-		)
+		return Config{}, fmt.Errorf("Ollama model is not specified")
 	}
 
-	promptPath := strings.TrimSpace(
-		u.promptInput.GetText(),
-	)
-
+	promptPath := strings.TrimSpace(u.promptInput.GetText())
 	if promptPath == "" {
-		return Config{}, fmt.Errorf(
-			"prompt file is not specified",
-		)
+		return Config{}, fmt.Errorf("prompt file is not specified")
 	}
 
-	absolutePromptPath, err := filepath.Abs(
-		promptPath,
-	)
+	absolutePromptPath, err := filepath.Abs(promptPath)
 	if err != nil {
-		return Config{}, fmt.Errorf(
-			"resolve prompt path: %w",
-			err,
-		)
+		return Config{}, fmt.Errorf("resolve prompt path: %w", err)
 	}
 
-	promptInfo, err := os.Stat(
-		absolutePromptPath,
-	)
+	promptInfo, err := os.Stat(absolutePromptPath)
 	if err != nil {
-		return Config{}, fmt.Errorf(
-			"open prompt file: %w",
-			err,
-		)
+		return Config{}, fmt.Errorf("open prompt file: %w", err)
 	}
 
 	if promptInfo.IsDir() {
@@ -588,23 +487,15 @@ func (u *UI) readSettings() (
 		)
 	}
 
-	workersText := strings.TrimSpace(
-		u.workersInput.GetText(),
-	)
+	workersText := strings.TrimSpace(u.workersInput.GetText())
+	workers, err := strconv.Atoi(workersText)
 
-	workers, err := strconv.Atoi(
-		workersText,
-	)
 	if err != nil {
-		return Config{}, fmt.Errorf(
-			"worker count must be a number",
-		)
+		return Config{}, fmt.Errorf("worker count must be a number")
 	}
 
 	if workers <= 0 {
-		return Config{}, fmt.Errorf(
-			"worker count must be greater than zero",
-		)
+		return Config{}, fmt.Errorf("worker count must be greater than zero")
 	}
 
 	cachePath := filepath.Join(
@@ -632,13 +523,8 @@ func (u *UI) readSettings() (
 func (u *UI) openProgress() {
 	u.currentPage = progressPageName
 
-	u.pages.SwitchToPage(
-		progressPageName,
-	)
-
-	u.application.SetFocus(
-		u.fileTable,
-	)
+	u.pages.SwitchToPage(progressPageName)
+	u.application.SetFocus(u.fileTable)
 
 	u.renderProgress()
 }
@@ -656,13 +542,9 @@ func (u *UI) openSettings() {
 	}
 
 	u.currentPage = settingsPageName
-	u.pages.SwitchToPage(
-		settingsPageName,
-	)
+	u.pages.SwitchToPage(settingsPageName)
 
-	u.application.SetFocus(
-		u.gameDirInput,
-	)
+	u.application.SetFocus(u.gameDirInput)
 }
 
 func (u *UI) stopTranslation() {
@@ -741,6 +623,7 @@ func (u *UI) renderProgress() {
 	if u.state == nil {
 		return
 	}
+
 	snapshot := u.state.Snapshot()
 
 	u.renderHeader()
@@ -751,9 +634,7 @@ func (u *UI) renderProgress() {
 }
 
 func (u *UI) renderHeader() {
-	promptName := strings.TrimSpace(
-		u.config.PromptName,
-	)
+	promptName := strings.TrimSpace(u.config.PromptName)
 
 	if promptName == "" {
 		promptName = filepath.Base(
@@ -818,11 +699,10 @@ func (u *UI) renderSummary(
 
 	u.summary.SetText(
 		fmt.Sprintf(
-			"[%s]%s[-]  %d%%\n"+
-				"Lines: %d/%d   Files: %d/%d   "+
+			"Lines: [%s]%d%%[-] (%d/%d)   "+
+				"Files: %d/%d   "+
 				"Errors: %d   Canceled: %d   Time: %s",
 			color,
-			buildProgressBar(percent),
 			percent,
 			snapshot.Completed,
 			snapshot.Total,
@@ -840,17 +720,13 @@ func (u *UI) renderFiles(
 ) {
 	selectedRow, _ := u.fileTable.GetSelection()
 	for u.fileTable.GetRowCount() > 0 {
-		u.fileTable.RemoveRow(
-			u.fileTable.GetRowCount() - 1,
-		)
+		u.fileTable.RemoveRow(u.fileTable.GetRowCount() - 1)
 	}
 
 	u.renderTableHeader()
 	for index, file := range snapshot.Files {
 		row := index + 1
-		statusText, statusColor := fileStatusPresentation(
-			file.Status,
-		)
+		statusText, statusColor := fileStatusPresentation(file.Status)
 
 		errorText := ""
 		if file.Err != nil {
@@ -860,9 +736,7 @@ func (u *UI) renderFiles(
 		u.fileTable.SetCell(
 			row,
 			0,
-			tview.NewTableCell(
-				u.displayPath(file.Path),
-			).
+			tview.NewTableCell(u.displayPath(file.Path)).
 				SetTextColor(tcell.ColorWhite).
 				SetExpansion(1).
 				SetMaxWidth(60),
@@ -880,9 +754,7 @@ func (u *UI) renderFiles(
 		u.fileTable.SetCell(
 			row,
 			2,
-			tview.NewTableCell(
-				fileProgressText(file),
-			).
+			tview.NewTableCell(fileProgressText(file)).
 				SetTextColor(tcell.ColorLightCyan).
 				SetAlign(tview.AlignRight).
 				SetMaxWidth(20),
@@ -902,9 +774,7 @@ func (u *UI) renderFiles(
 		u.fileTable.SetCell(
 			1,
 			0,
-			tview.NewTableCell(
-				"Files will be discovered after translation starts...",
-			).
+			tview.NewTableCell("Files will be discovered after translation starts...").
 				SetTextColor(tcell.ColorGray).
 				SetExpansion(1),
 		)
@@ -920,10 +790,7 @@ func (u *UI) renderFiles(
 		selectedRow = len(snapshot.Files)
 	}
 
-	u.fileTable.Select(
-		selectedRow,
-		0,
-	)
+	u.fileTable.Select(selectedRow, 0)
 }
 
 func (u *UI) renderTableHeader() {
@@ -951,11 +818,7 @@ func (u *UI) renderTableHeader() {
 			cell.SetAlign(tview.AlignRight)
 		}
 
-		u.fileTable.SetCell(
-			0,
-			column,
-			cell,
-		)
+		u.fileTable.SetCell(0, column, cell)
 	}
 }
 
@@ -967,11 +830,7 @@ func (u *UI) renderStatus(
 
 	switch {
 	case snapshot.Err != nil:
-		message = fmt.Sprintf(
-			"Error: %v",
-			snapshot.Err,
-		)
-
+		message = fmt.Sprintf("Error: %v", snapshot.Err)
 		color = "red"
 
 	case snapshot.Running:
@@ -1012,10 +871,7 @@ func (u *UI) updateButtons(
 func (u *UI) startRefreshLoop() {
 	u.refreshOnce.Do(
 		func() {
-			ticker := time.NewTicker(
-				uiRefreshInterval,
-			)
-
+			ticker := time.NewTicker(uiRefreshInterval)
 			go func() {
 				defer ticker.Stop()
 				for {
@@ -1030,8 +886,7 @@ func (u *UI) startRefreshLoop() {
 
 						u.application.QueueUpdateDraw(
 							func() {
-								if u.currentPage ==
-									progressPageName {
+								if u.currentPage == progressPageName {
 									u.renderProgress()
 								}
 							},
@@ -1052,7 +907,6 @@ func (u *UI) captureInput(
 	if u.exitDialogOpen {
 		if event.Key() == tcell.KeyEscape {
 			u.closeExitDialog()
-
 			return nil
 		}
 
@@ -1071,26 +925,22 @@ func (u *UI) captureInput(
 
 	case tcell.KeyF8:
 		u.stopTranslation()
-
 		return nil
 
 	case tcell.KeyEscape:
 		if u.currentPage == progressPageName {
 			u.openSettings()
-
 			return nil
 		}
 
 	case tcell.KeyCtrlC:
 		u.requestExit()
-
 		return nil
 	}
 
 	switch event.Rune() {
 	case 'q', 'Q':
 		u.requestExit()
-
 		return nil
 	}
 
@@ -1101,13 +951,13 @@ func (u *UI) requestExit() {
 	if u.exitDialogOpen {
 		return
 	}
+
 	u.exitDialogOpen = true
 	message := "Exit the application?"
 
 	if u.controller != nil &&
 		u.controller.IsRunning() {
-		message = "Translation is still running.\n\n" +
-			"Stop the translation and exit?"
+		message = "Translation is still running.\n\n" + "Stop the translation and exit?"
 	}
 
 	modal := tview.NewModal().
@@ -1120,13 +970,9 @@ func (u *UI) requestExit() {
 		)
 
 	modal.SetDoneFunc(
-		func(
-			buttonIndex int,
-			buttonLabel string,
-		) {
+		func(buttonIndex int, buttonLabel string) {
 			if buttonLabel == "Exit" {
 				u.beginExit()
-
 				return
 			}
 
@@ -1141,9 +987,7 @@ func (u *UI) requestExit() {
 		true,
 	)
 
-	u.application.SetFocus(
-		modal,
-	)
+	u.application.SetFocus(modal)
 }
 
 func (u *UI) beginExit() {
@@ -1172,20 +1016,14 @@ func (u *UI) closeExitDialog() {
 	}
 
 	u.exitDialogOpen = false
-	u.pages.RemovePage(
-		exitPageName,
-	)
+	u.pages.RemovePage(exitPageName)
 
 	switch u.currentPage {
 	case progressPageName:
-		u.application.SetFocus(
-			u.fileTable,
-		)
+		u.application.SetFocus(u.fileTable)
 
 	default:
-		u.application.SetFocus(
-			u.gameDirInput,
-		)
+		u.application.SetFocus(u.gameDirInput)
 	}
 }
 
@@ -1203,23 +1041,19 @@ func (u *UI) close() {
 }
 
 func (u *UI) setSettingsMessage(
-	message string,
-	color string,
+	message, color string,
 ) {
 	u.settingsStatus.SetText(
 		fmt.Sprintf(
 			"[%s]%s[-]",
 			color,
-			tview.Escape(
-				strings.TrimSpace(message),
-			),
+			tview.Escape(strings.TrimSpace(message)),
 		),
 	)
 }
 
 func (u *UI) setMessage(
-	message string,
-	color string,
+	message, color string,
 ) {
 	u.message = strings.TrimSpace(message)
 	u.messageColor = strings.TrimSpace(color)
@@ -1228,10 +1062,7 @@ func (u *UI) setMessage(
 func (u *UI) displayPath(
 	path string,
 ) string {
-	relativePath, err := filepath.Rel(
-		u.config.GameDir,
-		path,
-	)
+	relativePath, err := filepath.Rel(u.config.GameDir, path)
 	if err != nil {
 		return path
 	}
@@ -1241,10 +1072,7 @@ func (u *UI) displayPath(
 	}
 
 	if relativePath == ".." ||
-		strings.HasPrefix(
-			relativePath,
-			".."+string(filepath.Separator),
-		) {
+		strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
 		return path
 	}
 
@@ -1267,30 +1095,6 @@ func calculatePercent(
 	}
 
 	return completed * 100 / total
-}
-
-func buildProgressBar(
-	percent int,
-) string {
-	if percent < 0 {
-		percent = 0
-	}
-
-	if percent > 100 {
-		percent = 100
-	}
-
-	filled := percent *
-		progressBarWidth /
-		100
-
-	return strings.Repeat(
-		"█",
-		filled,
-	) + strings.Repeat(
-		"░",
-		progressBarWidth-filled,
-	)
 }
 
 func fileProgressText(
@@ -1321,10 +1125,7 @@ func fileProgressText(
 		completed = file.Total
 	}
 
-	percent := completed *
-		100 /
-		file.Total
-
+	percent := completed * 100 / file.Total
 	return fmt.Sprintf(
 		"%d/%d (%d%%)",
 		completed,
@@ -1335,34 +1136,25 @@ func fileProgressText(
 
 func fileStatusPresentation(
 	status progress.FileStatus,
-) (
-	string,
-	tcell.Color,
-) {
+) (string, tcell.Color) {
 	switch status {
 	case progress.FileStatusWaiting:
-		return "Waiting",
-			tcell.ColorGray
+		return "Waiting", tcell.ColorGray
 
 	case progress.FileStatusRunning:
-		return "Translating",
-			tcell.ColorYellow
+		return "Translating", tcell.ColorYellow
 
 	case progress.FileStatusCompleted:
-		return "Done",
-			tcell.ColorGreen
+		return "Done", tcell.ColorGreen
 
 	case progress.FileStatusFailed:
-		return "Error",
-			tcell.ColorRed
+		return "Error", tcell.ColorRed
 
 	case progress.FileStatusCanceled:
-		return "Canceled",
-			tcell.ColorOrange
+		return "Canceled", tcell.ColorOrange
 
 	default:
-		return string(status),
-			tcell.ColorWhite
+		return string(status), tcell.ColorWhite
 	}
 }
 
@@ -1371,7 +1163,6 @@ func countFilesWithStatus(
 	status progress.FileStatus,
 ) int {
 	count := 0
-
 	for _, file := range files {
 		if file.Status == status {
 			count++
@@ -1405,23 +1196,10 @@ func formatElapsed(
 		elapsed = 0
 	}
 
-	elapsed = elapsed.Truncate(
-		time.Second,
-	)
-
-	hours := int(
-		elapsed / time.Hour,
-	)
-
-	minutes := int(
-		elapsed % time.Hour /
-			time.Minute,
-	)
-
-	seconds := int(
-		elapsed % time.Minute /
-			time.Second,
-	)
+	elapsed = elapsed.Truncate(time.Second)
+	hours := int(elapsed / time.Hour)
+	minutes := int(elapsed % time.Hour / time.Minute)
+	seconds := int(elapsed % time.Minute / time.Second)
 
 	return fmt.Sprintf(
 		"%02d:%02d:%02d",

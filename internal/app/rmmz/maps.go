@@ -24,10 +24,7 @@ var mapFilePattern = regexp.MustCompile(
 func (a *RmmzEngine) ProcessMap(
 	mapPath string,
 ) error {
-	return a.ProcessMapContext(
-		context.Background(),
-		mapPath,
-	)
+	return a.ProcessMapContext(context.Background(), mapPath)
 }
 
 func (a *RmmzEngine) ProcessMapContext(
@@ -42,9 +39,7 @@ func (a *RmmzEngine) ProcessMapContext(
 		return err
 	}
 
-	sourceData, err := os.ReadFile(
-		mapPath,
-	)
+	sourceData, err := os.ReadFile(mapPath)
 	if err != nil {
 		return fmt.Errorf(
 			"read %s: %w",
@@ -57,9 +52,7 @@ func (a *RmmzEngine) ProcessMapContext(
 		return err
 	}
 
-	fileInfo, err := os.Stat(
-		mapPath,
-	)
+	fileInfo, err := os.Stat(mapPath)
 	if err != nil {
 		return fmt.Errorf(
 			"stat %s: %w",
@@ -72,9 +65,7 @@ func (a *RmmzEngine) ProcessMapContext(
 		return err
 	}
 
-	texts, err := rmmaps.Extract(
-		mapPath,
-	)
+	texts, err := rmmaps.Extract(mapPath)
 	if err != nil {
 		return fmt.Errorf(
 			"extract %s: %w",
@@ -84,47 +75,24 @@ func (a *RmmzEngine) ProcessMapContext(
 	}
 
 	reporter := a.Reporter()
-	reporter.FileDiscovered(
-		mapPath,
-		len(texts),
-	)
-
-	reporter.FileStarted(
-		mapPath,
-	)
+	reporter.FileDiscovered(mapPath, len(texts))
+	reporter.FileStarted(mapPath)
 
 	defer func() {
 		switch {
 		case resultErr == nil:
-			reporter.FileCompleted(
-				mapPath,
-			)
+			reporter.FileCompleted(mapPath)
 
-		case errors.Is(
-			resultErr,
-			context.Canceled,
-		) ||
-			errors.Is(
-				resultErr,
-				context.DeadlineExceeded,
-			):
-			reporter.FileCanceled(
-				mapPath,
-			)
+		case errors.Is(resultErr, context.Canceled) ||
+			errors.Is(resultErr, context.DeadlineExceeded):
+			reporter.FileCanceled(mapPath)
 
 		default:
-			reporter.FileFailed(
-				mapPath,
-				resultErr,
-			)
+			reporter.FileFailed(mapPath, resultErr)
 		}
 	}()
 
-	fmt.Printf(
-		"Found file: %s\n",
-		mapPath,
-	)
-
+	fmt.Printf("Found file: %s\n", mapPath)
 	fmt.Printf(
 		"Found text entries in %s: %d\n",
 		filepath.Base(mapPath),
@@ -136,11 +104,7 @@ func (a *RmmzEngine) ProcessMapContext(
 			return err
 		}
 
-		blockEnd := relatedTextBlockEnd(
-			texts,
-			index,
-		)
-
+		blockEnd := relatedTextBlockEnd(texts, index)
 		if blockEnd-index > 1 {
 			if err := a.translateMapTextBlock(
 				ctx,
@@ -170,10 +134,7 @@ func (a *RmmzEngine) ProcessMapContext(
 			text.Text,
 		)
 
-		translated, err := a.ollamaClient.Translate(
-			ctx,
-			text.Text,
-		)
+		translated, err := a.ollamaClient.Translate(ctx, text.Text)
 		if err != nil {
 			return fmt.Errorf(
 				"translate %s event %d page %d command %d field %s: %w",
@@ -186,10 +147,7 @@ func (a *RmmzEngine) ProcessMapContext(
 			)
 		}
 
-		translated = strings.TrimSpace(
-			translated,
-		)
-
+		translated = strings.TrimSpace(translated)
 		if translated == "" {
 			return fmt.Errorf(
 				"empty translation in %s event %d page %d command %d field %s",
@@ -202,11 +160,7 @@ func (a *RmmzEngine) ProcessMapContext(
 		}
 
 		text.Text = translated
-		reporter.FileAdvanced(
-			mapPath,
-			1,
-		)
-
+		reporter.FileAdvanced(mapPath, 1)
 		index++
 	}
 
@@ -214,10 +168,7 @@ func (a *RmmzEngine) ProcessMapContext(
 		return err
 	}
 
-	translatedData, err := applyMapTranslations(
-		sourceData,
-		texts,
-	)
+	translatedData, err := applyMapTranslations(sourceData, texts)
 	if err != nil {
 		return fmt.Errorf(
 			"apply translations to %s: %w",
@@ -243,33 +194,20 @@ func (a *RmmzEngine) ProcessMapContext(
 		)
 	}
 
-	defer os.Remove(
-		tempPath,
-	)
-
+	defer os.Remove(tempPath)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	oldDir := filepath.Join(
-		filepath.Dir(mapPath),
-		"old",
-	)
-
-	if err := os.MkdirAll(
-		oldDir,
-		0o755,
-	); err != nil {
+	oldDir := filepath.Join(filepath.Dir(mapPath), "old")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
 		return fmt.Errorf(
 			"create old directory: %w",
 			err,
 		)
 	}
 
-	extension := filepath.Ext(
-		mapPath,
-	)
-
+	extension := filepath.Ext(mapPath)
 	baseName := strings.TrimSuffix(
 		filepath.Base(mapPath),
 		extension,
@@ -278,25 +216,16 @@ func (a *RmmzEngine) ProcessMapContext(
 	backupName := fmt.Sprintf(
 		"%s_%s%s",
 		baseName,
-		time.Now().Format(
-			"20060102_150405",
-		),
+		time.Now().Format("20060102_150405"),
 		extension,
 	)
 
-	backupPath := filepath.Join(
-		oldDir,
-		backupName,
-	)
-
+	backupPath := filepath.Join(oldDir, backupName)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	if err := os.Rename(
-		mapPath,
-		backupPath,
-	); err != nil {
+	if err := os.Rename(mapPath, backupPath); err != nil {
 		return fmt.Errorf(
 			"move original %s: %w",
 			filepath.Base(mapPath),
@@ -304,15 +233,8 @@ func (a *RmmzEngine) ProcessMapContext(
 		)
 	}
 
-	if err := os.Rename(
-		tempPath,
-		mapPath,
-	); err != nil {
-		restoreErr := os.Rename(
-			backupPath,
-			mapPath,
-		)
-
+	if err := os.Rename(tempPath, mapPath); err != nil {
+		restoreErr := os.Rename(backupPath, mapPath)
 		if restoreErr != nil {
 			return fmt.Errorf(
 				"replace %s: %w; restore original: %v",
@@ -329,15 +251,8 @@ func (a *RmmzEngine) ProcessMapContext(
 		)
 	}
 
-	fmt.Printf(
-		"Translation saved: %s\n",
-		mapPath,
-	)
-
-	fmt.Printf(
-		"Original file backed up: %s\n\n",
-		backupPath,
-	)
+	fmt.Printf("Translation saved: %s\n", mapPath)
+	fmt.Printf("Original file backed up: %s\n\n", backupPath)
 
 	return nil
 }
@@ -345,10 +260,7 @@ func (a *RmmzEngine) ProcessMapContext(
 func (a *RmmzEngine) translateMapTextBlock(
 	ctx context.Context,
 	reporter interface {
-		FileAdvanced(
-			path string,
-			count int,
-		)
+		FileAdvanced(path string, count int)
 	},
 	mapPath string,
 	texts []rmmaps.MapText,
@@ -359,11 +271,7 @@ func (a *RmmzEngine) translateMapTextBlock(
 		return err
 	}
 
-	lines := make(
-		[]string,
-		end-start,
-	)
-
+	lines := make([]string, end-start)
 	for index := start; index < end; index++ {
 		lines[index-start] = texts[index].Text
 	}
@@ -385,10 +293,7 @@ func (a *RmmzEngine) translateMapTextBlock(
 		len(lines),
 	)
 
-	translatedLines, err := a.ollamaClient.TranslateLines(
-		ctx,
-		lines,
-	)
+	translatedLines, err := a.ollamaClient.TranslateLines(ctx, lines)
 	if err != nil {
 		return fmt.Errorf(
 			"translate %s block event %d page %d commands %d-%d field %s: %w",
@@ -420,10 +325,7 @@ func (a *RmmzEngine) translateMapTextBlock(
 			return err
 		}
 
-		translation := strings.TrimSpace(
-			translatedLines[index-start],
-		)
-
+		translation := strings.TrimSpace(translatedLines[index-start])
 		if translation == "" {
 			return fmt.Errorf(
 				"empty block translation in %s event %d page %d command %d element %d",
@@ -438,11 +340,7 @@ func (a *RmmzEngine) translateMapTextBlock(
 		texts[index].Text = translation
 	}
 
-	reporter.FileAdvanced(
-		mapPath,
-		len(lines),
-	)
-
+	reporter.FileAdvanced(mapPath, len(lines))
 	return nil
 }
 
@@ -539,10 +437,7 @@ func choiceBlockEnd(
 func (a *RmmzEngine) FindMapFiles(
 	gameDir string,
 ) ([]string, error) {
-	return a.FindMapFilesContext(
-		context.Background(),
-		gameDir,
-	)
+	return a.FindMapFilesContext(context.Background(), gameDir)
 }
 
 func (a *RmmzEngine) FindMapFilesContext(
@@ -557,9 +452,7 @@ func (a *RmmzEngine) FindMapFilesContext(
 		return nil, err
 	}
 
-	rootDir, err := filepath.Abs(
-		gameDir,
-	)
+	rootDir, err := filepath.Abs(gameDir)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"resolve game directory: %w",
@@ -567,9 +460,7 @@ func (a *RmmzEngine) FindMapFilesContext(
 		)
 	}
 
-	info, err := os.Stat(
-		rootDir,
-	)
+	info, err := os.Stat(rootDir)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"open game directory: %w",
@@ -602,10 +493,7 @@ func (a *RmmzEngine) FindMapFilesContext(
 			return nil, err
 		}
 
-		files, err := readMapFilesContext(
-			ctx,
-			candidate,
-		)
+		files, err := readMapFilesContext(ctx, candidate)
 		if err != nil {
 			return nil, err
 		}
@@ -615,10 +503,7 @@ func (a *RmmzEngine) FindMapFilesContext(
 		}
 	}
 
-	mapFiles := make(
-		[]string,
-		0,
-	)
+	mapFiles := make([]string, 0)
 
 	err = filepath.WalkDir(
 		rootDir,
@@ -647,26 +532,15 @@ func (a *RmmzEngine) FindMapFilesContext(
 				return nil
 			}
 
-			if !mapFilePattern.MatchString(
-				entry.Name(),
-			) {
+			if !mapFilePattern.MatchString(entry.Name()) {
 				return nil
 			}
 
-			if !strings.EqualFold(
-				filepath.Base(
-					filepath.Dir(path),
-				),
-				"data",
-			) {
+			if !strings.EqualFold(filepath.Base(filepath.Dir(path)), "data") {
 				return nil
 			}
 
-			mapFiles = append(
-				mapFiles,
-				path,
-			)
-
+			mapFiles = append(mapFiles, path)
 			return nil
 		},
 	)
@@ -684,14 +558,8 @@ func (a *RmmzEngine) FindMapFilesContext(
 		)
 	}
 
-	sort.Strings(
-		mapFiles,
-	)
-
-	fmt.Printf(
-		"Found maps: %d\n",
-		len(mapFiles),
-	)
+	sort.Strings(mapFiles)
+	fmt.Printf("Found maps: %d\n", len(mapFiles))
 
 	return mapFiles, nil
 }
@@ -701,10 +569,7 @@ func applyMapTranslations(
 	texts []rmmaps.MapText,
 ) ([]byte, error) {
 	var record map[string]any
-	if err := json.Unmarshal(
-		sourceData,
-		&record,
-	); err != nil {
+	if err := json.Unmarshal(sourceData, &record); err != nil {
 		return nil, fmt.Errorf(
 			"decode map JSON: %w",
 			err,
@@ -717,31 +582,17 @@ func applyMapTranslations(
 			continue
 		}
 
-		if err := applyMapCommandTranslation(
-			record,
-			text,
-		); err != nil {
+		if err := applyMapCommandTranslation(record, text); err != nil {
 			return nil, err
 		}
 	}
 
 	var output bytes.Buffer
-	encoder := json.NewEncoder(
-		&output,
-	)
+	encoder := json.NewEncoder(&output)
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
 
-	encoder.SetIndent(
-		"",
-		"  ",
-	)
-
-	encoder.SetEscapeHTML(
-		false,
-	)
-
-	if err := encoder.Encode(
-		record,
-	); err != nil {
+	if err := encoder.Encode(record); err != nil {
 		return nil, fmt.Errorf(
 			"encode map JSON: %w",
 			err,
@@ -757,9 +608,7 @@ func applyMapCommandTranslation(
 ) error {
 	events, ok := record["events"].([]any)
 	if !ok {
-		return fmt.Errorf(
-			"events is not an array",
-		)
+		return fmt.Errorf("events is not an array")
 	}
 
 	if text.EventIndex < 0 ||
@@ -872,10 +721,7 @@ func applyMapCommandTranslation(
 func readMapFiles(
 	dataDir string,
 ) ([]string, error) {
-	return readMapFilesContext(
-		context.Background(),
-		dataDir,
-	)
+	return readMapFilesContext(context.Background(), dataDir)
 }
 
 func readMapFilesContext(
@@ -890,9 +736,7 @@ func readMapFilesContext(
 		return nil, err
 	}
 
-	info, err := os.Stat(
-		dataDir,
-	)
+	info, err := os.Stat(dataDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -909,9 +753,7 @@ func readMapFilesContext(
 		return nil, nil
 	}
 
-	entries, err := os.ReadDir(
-		dataDir,
-	)
+	entries, err := os.ReadDir(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"read data directory %s: %w",
@@ -920,11 +762,7 @@ func readMapFilesContext(
 		)
 	}
 
-	mapFiles := make(
-		[]string,
-		0,
-	)
-
+	mapFiles := make([]string, 0)
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -934,30 +772,16 @@ func readMapFilesContext(
 			continue
 		}
 
-		if !mapFilePattern.MatchString(
-			entry.Name(),
-		) {
+		if !mapFilePattern.MatchString(entry.Name()) {
 			continue
 		}
 
-		mapFiles = append(
-			mapFiles,
-			filepath.Join(
-				dataDir,
-				entry.Name(),
-			),
-		)
+		mapFiles = append(mapFiles, filepath.Join(dataDir, entry.Name()))
 	}
 
-	sort.Strings(
-		mapFiles,
-	)
-
+	sort.Strings(mapFiles)
 	if len(mapFiles) > 0 {
-		fmt.Printf(
-			"Found maps: %d\n",
-			len(mapFiles),
-		)
+		fmt.Printf("Found maps: %d\n", len(mapFiles))
 	}
 
 	return mapFiles, nil

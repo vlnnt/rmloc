@@ -18,10 +18,7 @@ import (
 func (a *RmmzEngine) ProcessStates(
 	gameDir string,
 ) error {
-	return a.ProcessStatesContext(
-		context.Background(),
-		gameDir,
-	)
+	return a.ProcessStatesContext(context.Background(), gameDir)
 }
 
 func (a *RmmzEngine) ProcessStatesContext(
@@ -45,82 +42,41 @@ func (a *RmmzEngine) ProcessStatesContext(
 		return err
 	}
 
-	sourceData, err := os.ReadFile(
-		statesPath,
-	)
+	sourceData, err := os.ReadFile(statesPath)
 	if err != nil {
-		return fmt.Errorf(
-			"read States.json: %w",
-			err,
-		)
+		return fmt.Errorf("read States.json: %w", err)
 	}
 
-	fileInfo, err := os.Stat(
-		statesPath,
-	)
+	fileInfo, err := os.Stat(statesPath)
 	if err != nil {
-		return fmt.Errorf(
-			"stat States.json: %w",
-			err,
-		)
+		return fmt.Errorf("stat States.json: %w", err)
 	}
 
-	texts, err := states.Extract(
-		statesPath,
-	)
+	texts, err := states.Extract(statesPath)
 	if err != nil {
-		return fmt.Errorf(
-			"extract States.json: %w",
-			err,
-		)
+		return fmt.Errorf("extract States.json: %w", err)
 	}
 
 	reporter := a.Reporter()
-	reporter.FileDiscovered(
-		statesPath,
-		len(texts),
-	)
-
-	reporter.FileStarted(
-		statesPath,
-	)
+	reporter.FileDiscovered(statesPath, len(texts))
+	reporter.FileStarted(statesPath)
 
 	defer func() {
 		switch {
 		case resultErr == nil:
-			reporter.FileCompleted(
-				statesPath,
-			)
+			reporter.FileCompleted(statesPath)
 
-		case errors.Is(
-			resultErr,
-			context.Canceled,
-		) ||
-			errors.Is(
-				resultErr,
-				context.DeadlineExceeded,
-			):
-			reporter.FileCanceled(
-				statesPath,
-			)
+		case errors.Is(resultErr, context.Canceled) ||
+			errors.Is(resultErr, context.DeadlineExceeded):
+			reporter.FileCanceled(statesPath)
 
 		default:
-			reporter.FileFailed(
-				statesPath,
-				resultErr,
-			)
+			reporter.FileFailed(statesPath, resultErr)
 		}
 	}()
 
-	fmt.Printf(
-		"Found file: %s\n",
-		statesPath,
-	)
-
-	fmt.Printf(
-		"Found text entries: %d\n",
-		len(texts),
-	)
+	fmt.Printf("Found file: %s\n", statesPath)
+	fmt.Printf("Found text entries: %d\n", len(texts))
 
 	if err := translateTextEntries(
 		ctx,
@@ -128,20 +84,13 @@ func (a *RmmzEngine) ProcessStatesContext(
 		reporter,
 		statesPath,
 		texts,
-		func(
-			text *states.StateText,
-		) string {
+		func(text *states.StateText) string {
 			return text.Text
 		},
-		func(
-			text *states.StateText,
-			translation string,
-		) {
+		func(text *states.StateText, translation string) {
 			text.Text = translation
 		},
-		func(
-			text *states.StateText,
-		) string {
+		func(text *states.StateText) string {
 			return fmt.Sprintf(
 				"state=%d field=%s",
 				text.StateID,
@@ -149,20 +98,14 @@ func (a *RmmzEngine) ProcessStatesContext(
 			)
 		},
 	); err != nil {
-		return fmt.Errorf(
-			"translate States.json: %w",
-			err,
-		)
+		return fmt.Errorf("translate States.json: %w", err)
 	}
 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	translatedData, err := applyStateTranslations(
-		sourceData,
-		texts,
-	)
+	translatedData, err := applyStateTranslations(sourceData, texts)
 	if err != nil {
 		return err
 	}
@@ -173,9 +116,7 @@ func (a *RmmzEngine) ProcessStatesContext(
 
 	tempPath := statesPath + ".tmp"
 	if err := os.WriteFile(
-		tempPath,
-		translatedData,
-		fileInfo.Mode().Perm(),
+		tempPath, translatedData, fileInfo.Mode().Perm(),
 	); err != nil {
 		return fmt.Errorf(
 			"write temporary States.json: %w",
@@ -183,66 +124,32 @@ func (a *RmmzEngine) ProcessStatesContext(
 		)
 	}
 
-	defer os.Remove(
-		tempPath,
-	)
-
+	defer os.Remove(tempPath)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	oldDir := filepath.Join(
-		filepath.Dir(
-			statesPath,
-		),
-		"old",
-	)
-
-	if err := os.MkdirAll(
-		oldDir,
-		0o755,
-	); err != nil {
-		return fmt.Errorf(
-			"create old directory: %w",
-			err,
-		)
+	oldDir := filepath.Join(filepath.Dir(statesPath), "old")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		return fmt.Errorf("create old directory: %w", err)
 	}
 
 	backupName := fmt.Sprintf(
 		"States_%s.json",
-		time.Now().Format(
-			"20060102_150405",
-		),
+		time.Now().Format("20060102_150405"),
 	)
 
-	backupPath := filepath.Join(
-		oldDir,
-		backupName,
-	)
-
+	backupPath := filepath.Join(oldDir, backupName)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	if err := os.Rename(
-		statesPath,
-		backupPath,
-	); err != nil {
-		return fmt.Errorf(
-			"move original States.json: %w",
-			err,
-		)
+	if err := os.Rename(statesPath, backupPath); err != nil {
+		return fmt.Errorf("move original States.json: %w", err)
 	}
 
-	if err := os.Rename(
-		tempPath,
-		statesPath,
-	); err != nil {
-		restoreErr := os.Rename(
-			backupPath,
-			statesPath,
-		)
-
+	if err := os.Rename(tempPath, statesPath); err != nil {
+		restoreErr := os.Rename(backupPath, statesPath)
 		if restoreErr != nil {
 			return fmt.Errorf(
 				"replace States.json: %w; restore original: %v",
@@ -251,21 +158,11 @@ func (a *RmmzEngine) ProcessStatesContext(
 			)
 		}
 
-		return fmt.Errorf(
-			"replace States.json: %w",
-			err,
-		)
+		return fmt.Errorf("replace States.json: %w", err)
 	}
 
-	fmt.Printf(
-		"Translation saved: %s\n",
-		statesPath,
-	)
-
-	fmt.Printf(
-		"Original file backed up: %s\n\n",
-		backupPath,
-	)
+	fmt.Printf("Translation saved: %s\n", statesPath)
+	fmt.Printf("Original file backed up: %s\n\n", backupPath)
 
 	return nil
 }
@@ -273,31 +170,18 @@ func (a *RmmzEngine) ProcessStatesContext(
 func findStatesFile(
 	gameDir string,
 ) (string, error) {
-	rootDir, err := filepath.Abs(
-		gameDir,
-	)
+	rootDir, err := filepath.Abs(gameDir)
 	if err != nil {
-		return "", fmt.Errorf(
-			"resolve game directory: %w",
-			err,
-		)
+		return "", fmt.Errorf("resolve game directory: %w", err)
 	}
 
-	info, err := os.Stat(
-		rootDir,
-	)
+	info, err := os.Stat(rootDir)
 	if err != nil {
-		return "", fmt.Errorf(
-			"open game directory: %w",
-			err,
-		)
+		return "", fmt.Errorf("open game directory: %w", err)
 	}
 
 	if !info.IsDir() {
-		return "", fmt.Errorf(
-			"game path is not a directory: %s",
-			rootDir,
-		)
+		return "", fmt.Errorf("game path is not a directory: %s", rootDir)
 	}
 
 	candidates := []string{
@@ -319,9 +203,7 @@ func findStatesFile(
 	}
 
 	for _, candidate := range candidates {
-		if isFile(
-			candidate,
-		) {
+		if isFile(candidate) {
 			return candidate, nil
 		}
 	}
@@ -355,11 +237,7 @@ func findStatesFile(
 			}
 
 			if !strings.EqualFold(
-				filepath.Base(
-					filepath.Dir(
-						path,
-					),
-				),
+				filepath.Base(filepath.Dir(path)),
 				"data",
 			) {
 				return nil
@@ -370,10 +248,7 @@ func findStatesFile(
 		},
 	)
 	if err != nil {
-		return "", fmt.Errorf(
-			"search States.json: %w",
-			err,
-		)
+		return "", fmt.Errorf("search States.json: %w", err)
 	}
 
 	if statesPath == "" {
@@ -391,14 +266,8 @@ func applyStateTranslations(
 	texts []states.StateText,
 ) ([]byte, error) {
 	var records []map[string]any
-	if err := json.Unmarshal(
-		sourceData,
-		&records,
-	); err != nil {
-		return nil, fmt.Errorf(
-			"decode States.json: %w",
-			err,
-		)
+	if err := json.Unmarshal(sourceData, &records); err != nil {
+		return nil, fmt.Errorf("decode States.json: %w", err)
 	}
 
 	for _, text := range texts {
@@ -422,26 +291,12 @@ func applyStateTranslations(
 	}
 
 	var output bytes.Buffer
-	encoder := json.NewEncoder(
-		&output,
-	)
+	encoder := json.NewEncoder(&output)
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
 
-	encoder.SetIndent(
-		"",
-		"  ",
-	)
-
-	encoder.SetEscapeHTML(
-		false,
-	)
-
-	if err := encoder.Encode(
-		records,
-	); err != nil {
-		return nil, fmt.Errorf(
-			"encode States.json: %w",
-			err,
-		)
+	if err := encoder.Encode(records); err != nil {
+		return nil, fmt.Errorf("encode States.json: %w", err)
 	}
 
 	return output.Bytes(), nil

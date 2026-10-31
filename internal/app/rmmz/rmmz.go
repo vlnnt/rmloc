@@ -15,7 +15,6 @@ func NewRmmzEngine(
 	reporters ...progress.Reporter,
 ) *RmmzEngine {
 	reporter := progress.NewNoopReporter()
-
 	if len(reporters) > 0 &&
 		reporters[0] != nil {
 		reporter = reporters[0]

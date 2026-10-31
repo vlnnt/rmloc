@@ -8,36 +8,29 @@ import (
 )
 
 type State struct {
-	mu sync.RWMutex
-
-	files map[string]*progress.FileInfo
-	order []string
-
-	total     int
-	completed int
-	running   bool
-	err       error
-
+	mu         sync.RWMutex
+	files      map[string]*progress.FileInfo
+	order      []string
+	total      int
+	completed  int
+	running    bool
+	err        error
 	startedAt  time.Time
 	finishedAt time.Time
 }
 
 type StateSnapshot struct {
-	Files []progress.FileInfo
-
+	Files     []progress.FileInfo
 	Total     int
 	Completed int
 	Running   bool
 	Err       error
-
-	Elapsed time.Duration
+	Elapsed   time.Duration
 }
 
 func NewState() *State {
 	return &State{
-		files: make(
-			map[string]*progress.FileInfo,
-		),
+		files: make(map[string]*progress.FileInfo),
 	}
 }
 
@@ -45,9 +38,7 @@ func (s *State) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.files = make(
-		map[string]*progress.FileInfo,
-	)
+	s.files = make(map[string]*progress.FileInfo)
 
 	s.order = nil
 	s.total = 0
@@ -103,9 +94,7 @@ func (s *State) FileDiscovered(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	file := s.getOrCreateFile(
-		path,
-	)
+	file := s.getOrCreateFile(path)
 
 	s.total -= file.Total
 	s.completed -= file.Completed
@@ -129,13 +118,8 @@ func (s *State) FileStarted(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	file := s.getOrCreateFile(
-		path,
-	)
-
-	if isTerminalStatus(
-		file.Status,
-	) {
+	file := s.getOrCreateFile(path)
+	if isTerminalStatus(file.Status) {
 		return
 	}
 
@@ -154,18 +138,13 @@ func (s *State) FileAdvanced(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	file := s.getOrCreateFile(
-		path,
-	)
+	file := s.getOrCreateFile(path)
 
-	if isTerminalStatus(
-		file.Status,
-	) {
+	if isTerminalStatus(file.Status) {
 		return
 	}
 
 	previousCompleted := file.Completed
-
 	file.Completed += count
 
 	if file.Total > 0 &&
@@ -173,8 +152,7 @@ func (s *State) FileAdvanced(
 		file.Completed = file.Total
 	}
 
-	s.completed += file.Completed -
-		previousCompleted
+	s.completed += file.Completed - previousCompleted
 
 	s.normalizeTotals()
 }
@@ -185,22 +163,16 @@ func (s *State) FileCompleted(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	file := s.getOrCreateFile(
-		path,
-	)
-
-	if file.Status ==
-		progress.FileStatusCompleted {
+	file := s.getOrCreateFile(path)
+	if file.Status == progress.FileStatusCompleted {
 		return
 	}
 
-	if file.Status ==
-		progress.FileStatusFailed {
+	if file.Status == progress.FileStatusFailed {
 		return
 	}
 
 	previousCompleted := file.Completed
-
 	if file.Total > file.Completed {
 		file.Completed = file.Total
 	}
@@ -221,12 +193,9 @@ func (s *State) FileFailed(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	file := s.getOrCreateFile(
-		path,
-	)
+	file := s.getOrCreateFile(path)
 
-	if file.Status ==
-		progress.FileStatusCompleted {
+	if file.Status == progress.FileStatusCompleted {
 		return
 	}
 
@@ -240,9 +209,7 @@ func (s *State) FileCanceled(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	file := s.getOrCreateFile(
-		path,
-	)
+	file := s.getOrCreateFile(path)
 
 	switch file.Status {
 	case progress.FileStatusCompleted,
@@ -265,13 +232,11 @@ func (s *State) CancelWaitingFiles() {
 			continue
 		}
 
-		if file.Status !=
-			progress.FileStatusWaiting {
+		if file.Status != progress.FileStatusWaiting {
 			continue
 		}
 
 		file.Status = progress.FileStatusCanceled
-
 		file.Err = nil
 	}
 }
@@ -292,14 +257,10 @@ func (s *State) Snapshot() StateSnapshot {
 			continue
 		}
 
-		files = append(
-			files,
-			*file,
-		)
+		files = append(files, *file)
 	}
 
 	elapsed := s.elapsedLocked()
-
 	return StateSnapshot{
 		Files:     files,
 		Total:     s.total,
@@ -316,16 +277,11 @@ func (s *State) elapsedLocked() time.Duration {
 	}
 
 	endTime := s.finishedAt
-
-	if s.running ||
-		endTime.IsZero() {
+	if s.running || endTime.IsZero() {
 		endTime = time.Now()
 	}
 
-	elapsed := endTime.Sub(
-		s.startedAt,
-	)
-
+	elapsed := endTime.Sub(s.startedAt)
 	if elapsed < 0 {
 		return 0
 	}
@@ -347,11 +303,7 @@ func (s *State) getOrCreateFile(
 	}
 
 	s.files[path] = file
-
-	s.order = append(
-		s.order,
-		path,
-	)
+	s.order = append(s.order, path)
 
 	return file
 }

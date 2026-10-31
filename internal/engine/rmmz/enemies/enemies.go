@@ -25,9 +25,7 @@ func Extract(
 			continue
 		}
 
-		texts = appendEnemyText(
-			texts, enemy.ID, enemyIndex, "name", enemy.Name,
-		)
+		texts = appendEnemyText(texts, enemy.ID, enemyIndex, "name", enemy.Name)
 	}
 
 	return texts, nil

@@ -17,10 +17,7 @@ import (
 func (a *RmmzEngine) ProcessActors(
 	gameDir string,
 ) error {
-	return a.ProcessActorsContext(
-		context.Background(),
-		gameDir,
-	)
+	return a.ProcessActorsContext(context.Background(), gameDir)
 }
 
 func (a *RmmzEngine) ProcessActorsContext(
@@ -69,51 +66,25 @@ func (a *RmmzEngine) ProcessActorsContext(
 	}
 
 	reporter := a.Reporter()
-	reporter.FileDiscovered(
-		actorsPath,
-		len(texts),
-	)
-
-	reporter.FileStarted(
-		actorsPath,
-	)
+	reporter.FileDiscovered(actorsPath, len(texts))
+	reporter.FileStarted(actorsPath)
 
 	defer func() {
 		switch {
 		case resultErr == nil:
-			reporter.FileCompleted(
-				actorsPath,
-			)
+			reporter.FileCompleted(actorsPath)
 
-		case errors.Is(
-			resultErr,
-			context.Canceled,
-		) ||
-			errors.Is(
-				resultErr,
-				context.DeadlineExceeded,
-			):
-			reporter.FileCanceled(
-				actorsPath,
-			)
+		case errors.Is(resultErr, context.Canceled) ||
+			errors.Is(resultErr, context.DeadlineExceeded):
+			reporter.FileCanceled(actorsPath)
 
 		default:
-			reporter.FileFailed(
-				actorsPath,
-				resultErr,
-			)
+			reporter.FileFailed(actorsPath, resultErr)
 		}
 	}()
 
-	fmt.Printf(
-		"Found file: %s\n",
-		actorsPath,
-	)
-
-	fmt.Printf(
-		"Found text entries: %d\n",
-		len(texts),
-	)
+	fmt.Printf("Found file: %s\n", actorsPath)
+	fmt.Printf("Found text entries: %d\n", len(texts))
 
 	if err := translateTextEntries(
 		ctx,
@@ -121,20 +92,13 @@ func (a *RmmzEngine) ProcessActorsContext(
 		reporter,
 		actorsPath,
 		texts,
-		func(
-			text *actors.ActorText,
-		) string {
+		func(text *actors.ActorText) string {
 			return text.Text
 		},
-		func(
-			text *actors.ActorText,
-			translation string,
-		) {
+		func(text *actors.ActorText, translation string) {
 			text.Text = translation
 		},
-		func(
-			text *actors.ActorText,
-		) string {
+		func(text *actors.ActorText) string {
 			return fmt.Sprintf(
 				"actor=%d field=%s",
 				text.ActorID,
@@ -152,10 +116,7 @@ func (a *RmmzEngine) ProcessActorsContext(
 		return err
 	}
 
-	translatedData, err := applyActorTranslations(
-		sourceData,
-		texts,
-	)
+	translatedData, err := applyActorTranslations(sourceData, texts)
 	if err != nil {
 		return err
 	}
@@ -176,23 +137,14 @@ func (a *RmmzEngine) ProcessActorsContext(
 		)
 	}
 
-	defer os.Remove(
-		tempPath,
-	)
+	defer os.Remove(tempPath)
 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	oldDir := filepath.Join(
-		filepath.Dir(actorsPath),
-		"old",
-	)
-
-	if err := os.MkdirAll(
-		oldDir,
-		0o755,
-	); err != nil {
+	oldDir := filepath.Join(filepath.Dir(actorsPath), "old")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
 		return fmt.Errorf(
 			"create old directory: %w",
 			err,
@@ -201,39 +153,23 @@ func (a *RmmzEngine) ProcessActorsContext(
 
 	backupName := fmt.Sprintf(
 		"Actors_%s.json",
-		time.Now().Format(
-			"20060102_150405",
-		),
+		time.Now().Format("20060102_150405"),
 	)
 
-	backupPath := filepath.Join(
-		oldDir,
-		backupName,
-	)
-
+	backupPath := filepath.Join(oldDir, backupName)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	if err := os.Rename(
-		actorsPath,
-		backupPath,
-	); err != nil {
+	if err := os.Rename(actorsPath, backupPath); err != nil {
 		return fmt.Errorf(
 			"move original Actors.json: %w",
 			err,
 		)
 	}
 
-	if err := os.Rename(
-		tempPath,
-		actorsPath,
-	); err != nil {
-		restoreErr := os.Rename(
-			backupPath,
-			actorsPath,
-		)
-
+	if err := os.Rename(tempPath, actorsPath); err != nil {
+		restoreErr := os.Rename(backupPath, actorsPath)
 		if restoreErr != nil {
 			return fmt.Errorf(
 				"replace Actors.json: %w; restore original: %v",
@@ -339,14 +275,11 @@ func findActorsFile(
 				return nil
 			}
 
-			if filepath.Base(
-				filepath.Dir(path),
-			) != "data" {
+			if filepath.Base(filepath.Dir(path)) != "data" {
 				return nil
 			}
 
 			actorsPath = path
-
 			return fs.SkipAll
 		},
 	)
@@ -372,10 +305,7 @@ func applyActorTranslations(
 	texts []actors.ActorText,
 ) ([]byte, error) {
 	var records []map[string]any
-	if err := json.Unmarshal(
-		sourceData,
-		&records,
-	); err != nil {
+	if err := json.Unmarshal(sourceData, &records); err != nil {
 		return nil, fmt.Errorf(
 			"decode Actors.json: %w",
 			err,
@@ -403,15 +333,8 @@ func applyActorTranslations(
 	}
 
 	var output bytes.Buffer
-	encoder := json.NewEncoder(
-		&output,
-	)
-
-	encoder.SetIndent(
-		"",
-		"  ",
-	)
-
+	encoder := json.NewEncoder(&output)
+	encoder.SetIndent("", "  ")
 	encoder.SetEscapeHTML(false)
 
 	if err := encoder.Encode(records); err != nil {
@@ -428,6 +351,5 @@ func isFile(
 	path string,
 ) bool {
 	info, err := os.Stat(path)
-	return err == nil &&
-		!info.IsDir()
+	return err == nil && !info.IsDir()
 }

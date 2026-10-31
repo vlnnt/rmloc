@@ -12,40 +12,25 @@ func extractCommandTexts(
 ) ([]MapText, error) {
 	switch command.Code {
 	case showTextCode:
-		return extractStringParameter(
-			eventID, eventIndex, pageIndex, commandIndex, command, 4, "speakerName",
-		)
+		return extractStringParameter(eventID, eventIndex, pageIndex, commandIndex, command, 4, "speakerName")
 
 	case messageLineCode:
-		return extractStringParameter(
-			eventID, eventIndex, pageIndex, commandIndex, command, 0, "message",
-		)
+		return extractStringParameter(eventID, eventIndex, pageIndex, commandIndex, command, 0, "message")
 
 	case scrollingTextLineCode:
-		return extractStringParameter(
-			eventID,
-			eventIndex, pageIndex, commandIndex, command, 0, "scrollingText",
-		)
+		return extractStringParameter(eventID, eventIndex, pageIndex, commandIndex, command, 0, "scrollingText")
 
 	case changeNameCode:
-		return extractStringParameter(
-			eventID, eventIndex, pageIndex, commandIndex, command, 1, "actorName",
-		)
+		return extractStringParameter(eventID, eventIndex, pageIndex, commandIndex, command, 1, "actorName")
 
 	case changeNicknameCode:
-		return extractStringParameter(
-			eventID, eventIndex, pageIndex, commandIndex, command, 1, "actorNickname",
-		)
+		return extractStringParameter(eventID, eventIndex, pageIndex, commandIndex, command, 1, "actorNickname")
 
 	case changeProfileCode:
-		return extractStringParameter(
-			eventID, eventIndex, pageIndex, commandIndex, command, 1, "actorProfile",
-		)
+		return extractStringParameter(eventID, eventIndex, pageIndex, commandIndex, command, 1, "actorProfile")
 
 	case showChoicesCode:
-		return extractChoices(
-			eventID, eventIndex, pageIndex, commandIndex, command,
-		)
+		return extractChoices(eventID, eventIndex, pageIndex, commandIndex, command)
 
 	default:
 		return nil, nil

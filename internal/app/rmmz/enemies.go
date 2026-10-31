@@ -18,10 +18,7 @@ import (
 func (a *RmmzEngine) ProcessEnemies(
 	gameDir string,
 ) error {
-	return a.ProcessEnemiesContext(
-		context.Background(),
-		gameDir,
-	)
+	return a.ProcessEnemiesContext(context.Background(), gameDir)
 }
 
 func (a *RmmzEngine) ProcessEnemiesContext(
@@ -70,51 +67,25 @@ func (a *RmmzEngine) ProcessEnemiesContext(
 	}
 
 	reporter := a.Reporter()
-	reporter.FileDiscovered(
-		enemiesPath,
-		len(texts),
-	)
-
-	reporter.FileStarted(
-		enemiesPath,
-	)
+	reporter.FileDiscovered(enemiesPath, len(texts))
+	reporter.FileStarted(enemiesPath)
 
 	defer func() {
 		switch {
 		case resultErr == nil:
-			reporter.FileCompleted(
-				enemiesPath,
-			)
+			reporter.FileCompleted(enemiesPath)
 
-		case errors.Is(
-			resultErr,
-			context.Canceled,
-		) ||
-			errors.Is(
-				resultErr,
-				context.DeadlineExceeded,
-			):
-			reporter.FileCanceled(
-				enemiesPath,
-			)
+		case errors.Is(resultErr, context.Canceled) ||
+			errors.Is(resultErr, context.DeadlineExceeded):
+			reporter.FileCanceled(enemiesPath)
 
 		default:
-			reporter.FileFailed(
-				enemiesPath,
-				resultErr,
-			)
+			reporter.FileFailed(enemiesPath, resultErr)
 		}
 	}()
 
-	fmt.Printf(
-		"Found file: %s\n",
-		enemiesPath,
-	)
-
-	fmt.Printf(
-		"Found text entries: %d\n",
-		len(texts),
-	)
+	fmt.Printf("Found file: %s\n", enemiesPath)
+	fmt.Printf("Found text entries: %d\n", len(texts))
 
 	if err := translateTextEntries(
 		ctx,
@@ -122,20 +93,13 @@ func (a *RmmzEngine) ProcessEnemiesContext(
 		reporter,
 		enemiesPath,
 		texts,
-		func(
-			text *enemies.EnemyText,
-		) string {
+		func(text *enemies.EnemyText) string {
 			return text.Text
 		},
-		func(
-			text *enemies.EnemyText,
-			translation string,
-		) {
+		func(text *enemies.EnemyText, translation string) {
 			text.Text = translation
 		},
-		func(
-			text *enemies.EnemyText,
-		) string {
+		func(text *enemies.EnemyText) string {
 			return fmt.Sprintf(
 				"enemy=%d field=%s",
 				text.EnemyID,
@@ -143,20 +107,14 @@ func (a *RmmzEngine) ProcessEnemiesContext(
 			)
 		},
 	); err != nil {
-		return fmt.Errorf(
-			"translate Enemies.json: %w",
-			err,
-		)
+		return fmt.Errorf("translate Enemies.json: %w", err)
 	}
 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	translatedData, err := applyEnemyTranslations(
-		sourceData,
-		texts,
-	)
+	translatedData, err := applyEnemyTranslations(sourceData, texts)
 	if err != nil {
 		return err
 	}
@@ -177,23 +135,13 @@ func (a *RmmzEngine) ProcessEnemiesContext(
 		)
 	}
 
-	defer os.Remove(
-		tempPath,
-	)
-
+	defer os.Remove(tempPath)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	oldDir := filepath.Join(
-		filepath.Dir(enemiesPath),
-		"old",
-	)
-
-	if err := os.MkdirAll(
-		oldDir,
-		0o755,
-	); err != nil {
+	oldDir := filepath.Join(filepath.Dir(enemiesPath), "old")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
 		return fmt.Errorf(
 			"create old directory: %w",
 			err,
@@ -202,39 +150,23 @@ func (a *RmmzEngine) ProcessEnemiesContext(
 
 	backupName := fmt.Sprintf(
 		"Enemies_%s.json",
-		time.Now().Format(
-			"20060102_150405",
-		),
+		time.Now().Format("20060102_150405"),
 	)
 
-	backupPath := filepath.Join(
-		oldDir,
-		backupName,
-	)
-
+	backupPath := filepath.Join(oldDir, backupName)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	if err := os.Rename(
-		enemiesPath,
-		backupPath,
-	); err != nil {
+	if err := os.Rename(enemiesPath, backupPath); err != nil {
 		return fmt.Errorf(
 			"move original Enemies.json: %w",
 			err,
 		)
 	}
 
-	if err := os.Rename(
-		tempPath,
-		enemiesPath,
-	); err != nil {
-		restoreErr := os.Rename(
-			backupPath,
-			enemiesPath,
-		)
-
+	if err := os.Rename(tempPath, enemiesPath); err != nil {
+		restoreErr := os.Rename(backupPath, enemiesPath)
 		if restoreErr != nil {
 			return fmt.Errorf(
 				"replace Enemies.json: %w; restore original: %v",
@@ -249,15 +181,8 @@ func (a *RmmzEngine) ProcessEnemiesContext(
 		)
 	}
 
-	fmt.Printf(
-		"Translation saved: %s\n",
-		enemiesPath,
-	)
-
-	fmt.Printf(
-		"Original file backed up: %s\n\n",
-		backupPath,
-	)
+	fmt.Printf("Translation saved: %s\n", enemiesPath)
+	fmt.Printf("Original file backed up: %s\n\n", backupPath)
 
 	return nil
 }
@@ -341,9 +266,7 @@ func findEnemiesFile(
 			}
 
 			if !strings.EqualFold(
-				filepath.Base(
-					filepath.Dir(path),
-				),
+				filepath.Base(filepath.Dir(path)),
 				"data",
 			) {
 				return nil
@@ -375,11 +298,7 @@ func applyEnemyTranslations(
 	texts []enemies.EnemyText,
 ) ([]byte, error) {
 	var records []map[string]any
-
-	if err := json.Unmarshal(
-		sourceData,
-		&records,
-	); err != nil {
+	if err := json.Unmarshal(sourceData, &records); err != nil {
 		return nil, fmt.Errorf(
 			"decode Enemies.json: %w",
 			err,
@@ -407,16 +326,10 @@ func applyEnemyTranslations(
 	}
 
 	var output bytes.Buffer
-	encoder := json.NewEncoder(
-		&output,
-	)
-
-	encoder.SetIndent(
-		"",
-		"  ",
-	)
-
+	encoder := json.NewEncoder(&output)
+	encoder.SetIndent("", "  ")
 	encoder.SetEscapeHTML(false)
+
 	if err := encoder.Encode(records); err != nil {
 		return nil, fmt.Errorf(
 			"encode Enemies.json: %w",

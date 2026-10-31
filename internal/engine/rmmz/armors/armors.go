@@ -25,13 +25,8 @@ func Extract(
 			continue
 		}
 
-		texts = appendArmorText(
-			texts, armor.ID, armorIndex, "name", armor.Name,
-		)
-
-		texts = appendArmorText(
-			texts, armor.ID, armorIndex, "description", armor.Description,
-		)
+		texts = appendArmorText(texts, armor.ID, armorIndex, "name", armor.Name)
+		texts = appendArmorText(texts, armor.ID, armorIndex, "description", armor.Description)
 	}
 
 	return texts, nil

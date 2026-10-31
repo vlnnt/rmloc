@@ -11,13 +11,8 @@ import (
 )
 
 var (
-	ErrTranslationAlreadyRunning = errors.New(
-		"translation is already running",
-	)
-
-	ErrApplicationNotConfigured = errors.New(
-		"translation application is not configured",
-	)
+	ErrTranslationAlreadyRunning = errors.New("translation is already running")
+	ErrApplicationNotConfigured  = errors.New("translation application is not configured")
 )
 
 type RunResult struct {
@@ -49,18 +44,10 @@ func NewController(
 
 func (c *Controller) Start(
 	gameDir string,
-) (
-	<-chan RunResult,
-	error,
-) {
-	gameDir = strings.TrimSpace(
-		gameDir,
-	)
-
+) (<-chan RunResult, error) {
+	gameDir = strings.TrimSpace(gameDir)
 	if gameDir == "" {
-		return nil, fmt.Errorf(
-			"game directory is empty",
-		)
+		return nil, fmt.Errorf("game directory is empty")
 	}
 
 	c.mu.Lock()
@@ -78,24 +65,13 @@ func (c *Controller) Start(
 	c.state.SetRunning(true)
 	c.state.ClearError()
 
-	ctx, cancel := context.WithCancel(
-		context.Background(),
-	)
-
-	done := make(
-		chan RunResult,
-		1,
-	)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan RunResult, 1)
 
 	c.cancel = cancel
 	c.done = done
 
-	go c.run(
-		ctx,
-		gameDir,
-		done,
-	)
-
+	go c.run(ctx, gameDir, done)
 	return done, nil
 }
 
@@ -135,27 +111,11 @@ func (c *Controller) run(
 	gameDir string,
 	done chan RunResult,
 ) {
-	runErr := c.application.RunContext(
-		ctx,
-		gameDir,
-	)
-
-	canceled := errors.Is(
-		runErr,
-		context.Canceled,
-	) ||
-		errors.Is(
-			runErr,
-			context.DeadlineExceeded,
-		) ||
-		errors.Is(
-			ctx.Err(),
-			context.Canceled,
-		) ||
-		errors.Is(
-			ctx.Err(),
-			context.DeadlineExceeded,
-		)
+	runErr := c.application.RunContext(ctx, gameDir)
+	canceled := errors.Is(runErr, context.Canceled) ||
+		errors.Is(runErr, context.DeadlineExceeded) ||
+		errors.Is(ctx.Err(), context.Canceled) ||
+		errors.Is(ctx.Err(), context.DeadlineExceeded)
 
 	c.state.CancelWaitingFiles()
 	c.state.SetRunning(false)
@@ -163,9 +123,7 @@ func (c *Controller) run(
 	if canceled {
 		c.state.ClearError()
 	} else if runErr != nil {
-		c.state.SetError(
-			runErr,
-		)
+		c.state.SetError(runErr)
 	} else {
 		c.state.ClearError()
 	}
@@ -182,7 +140,5 @@ func (c *Controller) run(
 		Canceled: canceled,
 	}
 
-	close(
-		done,
-	)
+	close(done)
 }

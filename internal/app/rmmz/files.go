@@ -8,10 +8,7 @@ import (
 func (a *RmmzEngine) DiscoverTranslationFiles(
 	gameDir string,
 ) ([]string, error) {
-	return a.DiscoverTranslationFilesContext(
-		context.Background(),
-		gameDir,
-	)
+	return a.DiscoverTranslationFilesContext(context.Background(), gameDir)
 }
 
 func (a *RmmzEngine) DiscoverTranslationFilesContext(
@@ -26,19 +23,9 @@ func (a *RmmzEngine) DiscoverTranslationFilesContext(
 		return nil, err
 	}
 
-	files := make(
-		[]string,
-		0,
-		16,
-	)
-
-	seen := make(
-		map[string]struct{},
-	)
-
-	addFile := func(
-		path string,
-	) {
+	files := make([]string, 0, 16)
+	seen := make(map[string]struct{})
+	addFile := func(path string) {
 		if path == "" {
 			return
 		}
@@ -48,16 +35,10 @@ func (a *RmmzEngine) DiscoverTranslationFilesContext(
 		}
 
 		seen[path] = struct{}{}
-
-		files = append(
-			files,
-			path,
-		)
+		files = append(files, path)
 	}
 
-	actorsPath, err := findActorsFile(
-		gameDir,
-	)
+	actorsPath, err := findActorsFile(gameDir)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"discover Actors.json: %w",
@@ -65,17 +46,12 @@ func (a *RmmzEngine) DiscoverTranslationFilesContext(
 		)
 	}
 
-	addFile(
-		actorsPath,
-	)
-
+	addFile(actorsPath)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	armorsPath, err := findArmorsFile(
-		gameDir,
-	)
+	armorsPath, err := findArmorsFile(gameDir)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"discover Armors.json: %w",
@@ -83,17 +59,12 @@ func (a *RmmzEngine) DiscoverTranslationFilesContext(
 		)
 	}
 
-	addFile(
-		armorsPath,
-	)
-
+	addFile(armorsPath)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	enemiesPath, err := findEnemiesFile(
-		gameDir,
-	)
+	enemiesPath, err := findEnemiesFile(gameDir)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"discover Enemies.json: %w",
@@ -101,17 +72,12 @@ func (a *RmmzEngine) DiscoverTranslationFilesContext(
 		)
 	}
 
-	addFile(
-		enemiesPath,
-	)
-
+	addFile(enemiesPath)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	itemsPath, err := findItemsFile(
-		gameDir,
-	)
+	itemsPath, err := findItemsFile(gameDir)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"discover Items.json: %w",
@@ -119,17 +85,12 @@ func (a *RmmzEngine) DiscoverTranslationFilesContext(
 		)
 	}
 
-	addFile(
-		itemsPath,
-	)
-
+	addFile(itemsPath)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	skillsPath, err := findSkillsFile(
-		gameDir,
-	)
+	skillsPath, err := findSkillsFile(gameDir)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"discover Skills.json: %w",
@@ -137,17 +98,12 @@ func (a *RmmzEngine) DiscoverTranslationFilesContext(
 		)
 	}
 
-	addFile(
-		skillsPath,
-	)
-
+	addFile(skillsPath)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	statesPath, err := findStatesFile(
-		gameDir,
-	)
+	statesPath, err := findStatesFile(gameDir)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"discover States.json: %w",
@@ -155,17 +111,12 @@ func (a *RmmzEngine) DiscoverTranslationFilesContext(
 		)
 	}
 
-	addFile(
-		statesPath,
-	)
-
+	addFile(statesPath)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	weaponsPath, err := findWeaponsFile(
-		gameDir,
-	)
+	weaponsPath, err := findWeaponsFile(gameDir)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"discover Weapons.json: %w",
@@ -173,18 +124,12 @@ func (a *RmmzEngine) DiscoverTranslationFilesContext(
 		)
 	}
 
-	addFile(
-		weaponsPath,
-	)
-
+	addFile(weaponsPath)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	mapFiles, err := a.FindMapFilesContext(
-		ctx,
-		gameDir,
-	)
+	mapFiles, err := a.FindMapFilesContext(ctx, gameDir)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"discover map files: %w",
@@ -197,9 +142,7 @@ func (a *RmmzEngine) DiscoverTranslationFilesContext(
 			return nil, err
 		}
 
-		addFile(
-			mapPath,
-		)
+		addFile(mapPath)
 	}
 
 	return files, nil

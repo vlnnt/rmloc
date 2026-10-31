@@ -39,10 +39,7 @@ func NewApp(
 func (a *App) Run(
 	gameDir string,
 ) error {
-	return a.RunContext(
-		context.Background(),
-		gameDir,
-	)
+	return a.RunContext(context.Background(), gameDir)
 }
 
 func (a *App) RunContext(
@@ -57,10 +54,7 @@ func (a *App) RunContext(
 		return err
 	}
 
-	translationFiles, err := a.rmmzEngine.DiscoverTranslationFilesContext(
-		ctx,
-		gameDir,
-	)
+	translationFiles, err := a.rmmzEngine.DiscoverTranslationFilesContext(ctx, gameDir)
 	if err != nil {
 		return err
 	}
@@ -71,77 +65,36 @@ func (a *App) RunContext(
 			return err
 		}
 
-		reporter.FileDiscovered(
-			filePath,
-			0,
-		)
+		reporter.FileDiscovered(filePath, 0)
 	}
 
-	mapFiles, err := a.rmmzEngine.FindMapFilesContext(
-		ctx,
-		gameDir,
-	)
+	mapFiles, err := a.rmmzEngine.FindMapFilesContext(ctx, gameDir)
 	if err != nil {
 		return err
 	}
 
 	type job func(context.Context) error
 	jobs := []job{
-		func(
-			ctx context.Context,
-		) error {
-			return a.rmmzEngine.ProcessActorsContext(
-				ctx,
-				gameDir,
-			)
+		func(ctx context.Context) error {
+			return a.rmmzEngine.ProcessActorsContext(ctx, gameDir)
 		},
-		func(
-			ctx context.Context,
-		) error {
-			return a.rmmzEngine.ProcessArmorsContext(
-				ctx,
-				gameDir,
-			)
+		func(ctx context.Context) error {
+			return a.rmmzEngine.ProcessArmorsContext(ctx, gameDir)
 		},
-		func(
-			ctx context.Context,
-		) error {
-			return a.rmmzEngine.ProcessEnemiesContext(
-				ctx,
-				gameDir,
-			)
+		func(ctx context.Context) error {
+			return a.rmmzEngine.ProcessEnemiesContext(ctx, gameDir)
 		},
-		func(
-			ctx context.Context,
-		) error {
-			return a.rmmzEngine.ProcessItemsContext(
-				ctx,
-				gameDir,
-			)
+		func(ctx context.Context) error {
+			return a.rmmzEngine.ProcessItemsContext(ctx, gameDir)
 		},
-		func(
-			ctx context.Context,
-		) error {
-			return a.rmmzEngine.ProcessSkillsContext(
-				ctx,
-				gameDir,
-			)
+		func(ctx context.Context) error {
+			return a.rmmzEngine.ProcessSkillsContext(ctx, gameDir)
 		},
-		func(
-			ctx context.Context,
-		) error {
-			return a.rmmzEngine.ProcessStatesContext(
-				ctx,
-				gameDir,
-			)
+		func(ctx context.Context) error {
+			return a.rmmzEngine.ProcessStatesContext(ctx, gameDir)
 		},
-		func(
-			ctx context.Context,
-		) error {
-			return a.rmmzEngine.ProcessWeaponsContext(
-				ctx,
-				gameDir,
-			)
+		func(ctx context.Context) error {
+			return a.rmmzEngine.ProcessWeaponsContext(ctx, gameDir)
 		},
 	}
 
@@ -149,24 +102,14 @@ func (a *App) RunContext(
 		currentMapPath := mapPath
 		jobs = append(
 			jobs,
-			func(
-				ctx context.Context,
-			) error {
-				return a.rmmzEngine.ProcessMapContext(
-					ctx,
-					currentMapPath,
-				)
+			func(ctx context.Context) error {
+				return a.rmmzEngine.ProcessMapContext(ctx, currentMapPath)
 			},
 		)
 	}
 
-	group, groupContext := errgroup.WithContext(
-		ctx,
-	)
-
-	group.SetLimit(
-		a.workers,
-	)
+	group, groupContext := errgroup.WithContext(ctx)
+	group.SetLimit(a.workers)
 
 	for _, currentJob := range jobs {
 		if err := groupContext.Err(); err != nil {
@@ -180,9 +123,7 @@ func (a *App) RunContext(
 					return err
 				}
 
-				return currentJob(
-					groupContext,
-				)
+				return currentJob(groupContext)
 			},
 		)
 	}
