@@ -26,6 +26,10 @@ type Controller struct {
 	state       *State
 	cancel      context.CancelFunc
 	done        chan RunResult
+
+	paused   bool
+	stopping bool
+	resumeCh chan struct{}
 }
 
 func NewController(
@@ -71,19 +75,55 @@ func (c *Controller) Start(
 	c.cancel = cancel
 	c.done = done
 
+	c.paused = false
+	c.stopping = false
+	c.resumeCh = nil
+
 	go c.run(ctx, gameDir, done)
+
 	return done, nil
+}
+
+func (c *Controller) Pause() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.cancel == nil || c.paused || c.stopping {
+		return false
+	}
+
+	c.paused = true
+	c.resumeCh = make(chan struct{})
+
+	return true
+}
+
+func (c *Controller) Resume() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.cancel == nil || !c.paused || c.stopping {
+		return false
+	}
+
+	c.resumeLocked()
+
+	return true
 }
 
 func (c *Controller) Stop() bool {
 	c.mu.Lock()
 
-	cancel := c.cancel
-	c.mu.Unlock()
-
-	if cancel == nil {
+	if c.cancel == nil || c.stopping {
+		c.mu.Unlock()
 		return false
 	}
+
+	c.stopping = true
+	cancel := c.cancel
+
+	c.resumeLocked()
+	c.mu.Unlock()
 
 	c.state.CancelWaitingFiles()
 	cancel()
@@ -91,11 +131,44 @@ func (c *Controller) Stop() bool {
 	return true
 }
 
+func (c *Controller) WaitIfResumed(
+	ctx context.Context,
+) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		c.mu.Lock()
+		paused := c.paused
+		resumeCh := c.resumeCh
+		c.mu.Unlock()
+
+		if !paused {
+			return ctx.Err()
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case <-resumeCh:
+		}
+	}
+}
+
 func (c *Controller) IsRunning() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	return c.cancel != nil
+}
+
+func (c *Controller) IsPaused() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.cancel != nil && c.paused
 }
 
 func (c *Controller) State() *State {
@@ -106,12 +179,23 @@ func (c *Controller) Snapshot() StateSnapshot {
 	return c.state.Snapshot()
 }
 
+func (c *Controller) resumeLocked() {
+	if !c.paused {
+		return
+	}
+
+	c.paused = false
+	close(c.resumeCh)
+	c.resumeCh = nil
+}
+
 func (c *Controller) run(
 	ctx context.Context,
 	gameDir string,
 	done chan RunResult,
 ) {
-	runErr := c.application.RunContext(ctx, gameDir)
+	runErr := c.application.Run(ctx, gameDir)
+
 	canceled := errors.Is(runErr, context.Canceled) ||
 		errors.Is(runErr, context.DeadlineExceeded) ||
 		errors.Is(ctx.Err(), context.Canceled) ||
@@ -129,12 +213,17 @@ func (c *Controller) run(
 	}
 
 	c.mu.Lock()
+
 	if c.done == done {
+		c.resumeLocked()
+
 		c.cancel = nil
 		c.done = nil
+		c.stopping = false
 	}
 
 	c.mu.Unlock()
+
 	done <- RunResult{
 		Err:      runErr,
 		Canceled: canceled,

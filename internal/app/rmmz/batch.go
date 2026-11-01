@@ -11,6 +11,42 @@ import (
 
 const databaseTranslationBatchSize = 8
 
+type pauseWaiterKey struct{}
+
+func WithPauseWaiter(
+	ctx context.Context,
+	waiter func(context.Context) error,
+) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if waiter == nil {
+		return ctx
+	}
+
+	return context.WithValue(ctx, pauseWaiterKey{}, waiter)
+}
+
+func waitForTranslationResume(
+	ctx context.Context,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	waiter, ok := ctx.Value(pauseWaiterKey{}).(func(context.Context) error)
+	if !ok {
+		return nil
+	}
+
+	if err := waiter(ctx); err != nil {
+		return err
+	}
+
+	return ctx.Err()
+}
+
 func translateTextEntries[T any](
 	ctx context.Context,
 	client *ollama.Client,
@@ -38,7 +74,7 @@ func translateTextEntries[T any](
 	}
 
 	for start := 0; start < len(entries); start += databaseTranslationBatchSize {
-		if err := ctx.Err(); err != nil {
+		if err := waitForTranslationResume(ctx); err != nil {
 			return err
 		}
 

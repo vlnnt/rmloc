@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,44 +26,47 @@ const (
 	progressPageName  = "progress"
 	exitPageName      = "exit"
 	defaultOllamaURL  = "http://localhost:11434"
-	defaultModel      = "qwen2.5:1.5b"
-	defaultWorkers    = 2
+	defaultModel      = ""
+	defaultWorkers    = 1
 	uiRefreshInterval = 150 * time.Millisecond
-	progressBarWidth  = 32
+	settingsSaveDelay = 500 * time.Millisecond
 )
 
 type UI struct {
-	application    *tview.Application
-	pages          *tview.Pages
-	settingsRoot   *tview.Flex
-	settingsForm   *tview.Form
-	settingsStatus *tview.TextView
-	gameDirInput   *tview.InputField
-	ollamaInput    *tview.InputField
-	modelInput     *tview.InputField
-	promptInput    *tview.InputField
-	workersInput   *tview.InputField
-	progressRoot   *tview.Flex
-	header         *tview.TextView
-	summary        *tview.TextView
-	fileTable      *tview.Table
-	status         *tview.TextView
-	buttons        *tview.Form
-	restartButton  *tview.Button
-	stopButton     *tview.Button
-	settingsButton *tview.Button
-	exitButton     *tview.Button
-	state          *State
-	controller     *Controller
-	config         Config
-	currentPage    string
-	message        string
-	messageColor   string
-	exitDialogOpen bool
-	exitAfterStop  bool
-	closed         chan struct{}
-	closeOnce      sync.Once
-	refreshOnce    sync.Once
+	application       *tview.Application
+	pages             *tview.Pages
+	settingsRoot      *tview.Flex
+	settingsForm      *tview.Form
+	settingsStatus    *tview.TextView
+	gameDirInput      *tview.InputField
+	ollamaInput       *tview.InputField
+	modelInput        *tview.InputField
+	promptInput       *tview.InputField
+	workersInput      *tview.InputField
+	progressRoot      *tview.Flex
+	header            *tview.TextView
+	summary           *tview.TextView
+	fileTable         *tview.Table
+	status            *tview.TextView
+	buttons           *tview.Form
+	restartButton     *tview.Button
+	pauseButton       *tview.Button
+	stopButton        *tview.Button
+	settingsButton    *tview.Button
+	exitButton        *tview.Button
+	state             *State
+	controller        *Controller
+	config            Config
+	settingsDirty     bool
+	settingsChangedAt time.Time
+	currentPage       string
+	message           string
+	messageColor      string
+	exitDialogOpen    bool
+	exitAfterStop     bool
+	closed            chan struct{}
+	closeOnce         sync.Once
+	refreshOnce       sync.Once
 }
 
 func Run() error {
@@ -84,12 +90,14 @@ func NewUI() *UI {
 
 func (u *UI) Run() error {
 	u.application.EnableMouse(true)
+	u.application.EnablePaste(true)
 	u.application.SetRoot(u.pages, true)
 	u.application.SetFocus(u.gameDirInput)
 	u.application.SetInputCapture(u.captureInput)
 
 	u.startRefreshLoop()
 	runErr := runTviewApplication(u.application)
+	saveErr := u.flushSettings(true)
 
 	if u.controller != nil &&
 		u.controller.IsRunning() {
@@ -97,7 +105,11 @@ func (u *UI) Run() error {
 	}
 
 	u.close()
-	return runErr
+	if runErr != nil {
+		return runErr
+	}
+
+	return saveErr
 }
 
 func (u *UI) build() {
@@ -133,6 +145,34 @@ func (u *UI) buildSettingsPage() {
 		"en-ru.json",
 	)
 
+	savedConfig, loadErr := LoadConfig()
+
+	gameDir := currentDirectory
+	ollamaURL := defaultOllamaURL
+	model := defaultModel
+	promptPath := defaultPromptPath
+	workers := defaultWorkers
+
+	if savedConfig.GameDir != "" {
+		gameDir = savedConfig.GameDir
+	}
+
+	if savedConfig.OllamaURL != "" {
+		ollamaURL = savedConfig.OllamaURL
+	}
+
+	if savedConfig.Model != "" {
+		model = savedConfig.Model
+	}
+
+	if savedConfig.PromptPath != "" {
+		promptPath = savedConfig.PromptPath
+	}
+
+	if savedConfig.WorkerCount > 0 {
+		workers = savedConfig.WorkerCount
+	}
+
 	title := tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter)
@@ -147,28 +187,39 @@ func (u *UI) buildSettingsPage() {
 
 	u.gameDirInput = tview.NewInputField().
 		SetLabel("Game folder: ").
-		SetText(currentDirectory).
+		SetText(gameDir).
 		SetFieldWidth(0)
 
 	u.ollamaInput = tview.NewInputField().
 		SetLabel("Ollama URL: ").
-		SetText(defaultOllamaURL).
+		SetText(ollamaURL).
 		SetFieldWidth(0)
 
 	u.modelInput = tview.NewInputField().
 		SetLabel("Model:       ").
-		SetText(defaultModel).
+		SetText(model).
 		SetFieldWidth(0)
 
 	u.promptInput = tview.NewInputField().
 		SetLabel("Prompt:      ").
-		SetText(defaultPromptPath).
+		SetText(promptPath).
 		SetFieldWidth(0)
 
 	u.workersInput = tview.NewInputField().
 		SetLabel("Workers:     ").
-		SetText(strconv.Itoa(defaultWorkers)).
+		SetText(strconv.Itoa(workers)).
 		SetFieldWidth(8)
+
+	onSettingsChanged := func(_ string) {
+		u.settingsDirty = true
+		u.settingsChangedAt = time.Now()
+	}
+
+	u.gameDirInput.SetChangedFunc(onSettingsChanged)
+	u.ollamaInput.SetChangedFunc(onSettingsChanged)
+	u.modelInput.SetChangedFunc(onSettingsChanged)
+	u.promptInput.SetChangedFunc(onSettingsChanged)
+	u.workersInput.SetChangedFunc(onSettingsChanged)
 
 	u.settingsForm = tview.NewForm()
 	u.settingsForm.AddFormItem(u.gameDirInput)
@@ -209,8 +260,8 @@ func (u *UI) buildSettingsPage() {
 		SetTextAlign(tview.AlignCenter)
 
 	help.SetText(
-		"[gray]Tab / Shift+Tab — switch between fields   " +
-			"F5 — start   Q — exit[-]",
+		"[gray]Tab / Shift+Tab — switch fields   " +
+			"Ctrl+V — paste   F5 — start   Q — exit[-]",
 	)
 
 	u.settingsRoot = tview.NewFlex().
@@ -219,6 +270,13 @@ func (u *UI) buildSettingsPage() {
 		AddItem(u.settingsForm, 0, 1, true).
 		AddItem(u.settingsStatus, 3, 0, false).
 		AddItem(help, 2, 0, false)
+
+	if loadErr != nil {
+		u.setSettingsMessage(
+			fmt.Sprintf("Failed to load settings: %v", loadErr),
+			"red",
+		)
+	}
 }
 
 func (u *UI) buildProgressPage() {
@@ -263,6 +321,11 @@ func (u *UI) buildProgressPage() {
 	)
 
 	u.buttons.AddButton(
+		"Pause [F6]",
+		u.togglePause,
+	)
+
+	u.buttons.AddButton(
 		"Stop [F8]",
 		u.stopTranslation,
 	)
@@ -278,9 +341,10 @@ func (u *UI) buildProgressPage() {
 	)
 
 	u.restartButton = u.buttons.GetButton(0)
-	u.stopButton = u.buttons.GetButton(1)
-	u.settingsButton = u.buttons.GetButton(2)
-	u.exitButton = u.buttons.GetButton(3)
+	u.pauseButton = u.buttons.GetButton(1)
+	u.stopButton = u.buttons.GetButton(2)
+	u.settingsButton = u.buttons.GetButton(3)
+	u.exitButton = u.buttons.GetButton(4)
 
 	u.progressRoot = tview.NewFlex().
 		SetDirection(tview.FlexRow).
@@ -545,6 +609,26 @@ func (u *UI) openSettings() {
 	u.pages.SwitchToPage(settingsPageName)
 
 	u.application.SetFocus(u.gameDirInput)
+}
+
+func (u *UI) togglePause() {
+	if u.currentPage != progressPageName ||
+		u.controller == nil ||
+		!u.controller.IsRunning() {
+		return
+	}
+
+	if u.controller.IsPaused() {
+		if u.controller.Resume() {
+			u.setMessage("Translation resumed.", "yellow")
+		}
+	} else {
+		if u.controller.Pause() {
+			u.setMessage("Translation paused.", "orange")
+		}
+	}
+
+	u.renderProgress()
 }
 
 func (u *UI) stopTranslation() {
@@ -833,6 +917,10 @@ func (u *UI) renderStatus(
 		message = fmt.Sprintf("Error: %v", snapshot.Err)
 		color = "red"
 
+	case snapshot.Running && u.controller != nil && u.controller.IsPaused():
+		message = "Translation paused. In-flight requests may still finish."
+		color = "orange"
+
 	case snapshot.Running:
 		if message == "" {
 			message = "Translation is running..."
@@ -863,9 +951,16 @@ func (u *UI) updateButtons(
 	running bool,
 ) {
 	u.restartButton.SetDisabled(running)
+	u.pauseButton.SetDisabled(!running)
 	u.stopButton.SetDisabled(!running)
 	u.settingsButton.SetDisabled(running)
 	u.exitButton.SetDisabled(false)
+
+	if running && u.controller != nil && u.controller.IsPaused() {
+		u.pauseButton.SetLabel("Resume [F6]")
+	} else {
+		u.pauseButton.SetLabel("Pause [F6]")
+	}
 }
 
 func (u *UI) startRefreshLoop() {
@@ -886,6 +981,13 @@ func (u *UI) startRefreshLoop() {
 
 						u.application.QueueUpdateDraw(
 							func() {
+								if err := u.flushSettings(false); err != nil {
+									u.setSettingsMessage(
+										fmt.Sprintf("Failed to save settings: %v", err),
+										"red",
+									)
+								}
+
 								if u.currentPage == progressPageName {
 									u.renderProgress()
 								}
@@ -909,8 +1011,14 @@ func (u *UI) captureInput(
 			u.closeExitDialog()
 			return nil
 		}
-
 		return event
+	}
+
+	if event.Key() == tcell.KeyCtrlV {
+		if field := u.focusedSettingsInput(); field != nil {
+			u.pasteIntoInput(field)
+			return nil
+		}
 	}
 
 	switch event.Key() {
@@ -920,12 +1028,19 @@ func (u *UI) captureInput(
 		} else {
 			u.restartTranslation()
 		}
-
 		return nil
+
+	case tcell.KeyF6:
+		if u.currentPage == progressPageName {
+			u.togglePause()
+			return nil
+		}
 
 	case tcell.KeyF8:
-		u.stopTranslation()
-		return nil
+		if u.currentPage == progressPageName {
+			u.stopTranslation()
+			return nil
+		}
 
 	case tcell.KeyEscape:
 		if u.currentPage == progressPageName {
@@ -938,13 +1053,172 @@ func (u *UI) captureInput(
 		return nil
 	}
 
-	switch event.Rune() {
-	case 'q', 'Q':
-		u.requestExit()
-		return nil
+	if u.focusedSettingsInput() != nil {
+		return event
+	}
+
+	if event.Key() == tcell.KeyRune {
+		switch event.Rune() {
+		case 'q', 'Q':
+			u.requestExit()
+			return nil
+		}
 	}
 
 	return event
+}
+
+func (u *UI) currentSettings() (Config, error) {
+	workers, err := strconv.Atoi(
+		strings.TrimSpace(u.workersInput.GetText()),
+	)
+	if err != nil || workers <= 0 {
+		return Config{}, fmt.Errorf("worker count must be a positive number")
+	}
+
+	gameDir := strings.TrimSpace(u.gameDirInput.GetText())
+	return Config{
+		GameDir:    gameDir,
+		OllamaURL:  u.ollamaInput.GetText(),
+		Model:      u.modelInput.GetText(),
+		PromptPath: u.promptInput.GetText(),
+		CachePath: filepath.Join(
+			gameDir,
+			".rmloc",
+			"translation-cache.jsonl",
+		),
+		WorkerCount: workers,
+	}, nil
+}
+
+func (u *UI) flushSettings(
+	force bool,
+) error {
+	if !u.settingsDirty {
+		return nil
+	}
+
+	if !force && time.Since(u.settingsChangedAt) < settingsSaveDelay {
+		return nil
+	}
+
+	config, err := u.currentSettings()
+	if err != nil {
+		return err
+	}
+
+	if err := SaveConfig(config); err != nil {
+		return err
+	}
+
+	u.settingsDirty = false
+	return nil
+}
+
+func (u *UI) focusedSettingsInput() *tview.InputField {
+	if u.currentPage != settingsPageName {
+		return nil
+	}
+
+	fields := []*tview.InputField{
+		u.gameDirInput,
+		u.ollamaInput,
+		u.modelInput,
+		u.promptInput,
+		u.workersInput,
+	}
+
+	for _, field := range fields {
+		if field != nil && field.HasFocus() {
+			return field
+		}
+	}
+
+	return nil
+}
+
+func readClipboard() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	type clipboardCommand struct {
+		name string
+		args []string
+	}
+
+	var commands []clipboardCommand
+	switch runtime.GOOS {
+	case "windows":
+		commands = []clipboardCommand{
+			{name: "powershell.exe", args: []string{"-NoProfile", "-Command", "Get-Clipboard -Raw"}},
+		}
+
+	case "darwin":
+		commands = []clipboardCommand{{name: "pbpaste"}}
+
+	default:
+		if os.Getenv("WAYLAND_DISPLAY") != "" {
+			commands = append(commands, clipboardCommand{
+				name: "wl-paste",
+				args: []string{"--no-newline"},
+			})
+		}
+		commands = append(commands,
+			clipboardCommand{
+				name: "xclip",
+				args: []string{"-selection", "clipboard", "-o"},
+			},
+			clipboardCommand{
+				name: "xsel",
+				args: []string{"--clipboard", "--output"},
+			},
+		)
+	}
+
+	for _, candidate := range commands {
+		if _, err := exec.LookPath(candidate.name); err != nil {
+			continue
+		}
+
+		output, err := exec.CommandContext(ctx, candidate.name, candidate.args...).Output()
+		if err == nil {
+			return strings.TrimRight(string(output), "\r\n"), nil
+		}
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+	}
+
+	return "", fmt.Errorf("clipboard is unavailable; install wl-clipboard or xclip")
+}
+
+func (u *UI) pasteIntoInput(
+	field *tview.InputField,
+) {
+	go func() {
+		text, err := readClipboard()
+
+		select {
+		case <-u.closed:
+			return
+		default:
+		}
+
+		u.application.QueueUpdateDraw(func() {
+			if err != nil {
+				u.setSettingsMessage(fmt.Sprintf("Paste failed: %v", err), "red")
+				return
+			}
+			if text == "" || u.exitDialogOpen || u.focusedSettingsInput() != field {
+				return
+			}
+			if handler := field.PasteHandler(); handler != nil {
+				handler(text, func(p tview.Primitive) {
+					u.application.SetFocus(p)
+				})
+			}
+		})
+	}()
 }
 
 func (u *UI) requestExit() {

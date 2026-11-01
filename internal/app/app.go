@@ -14,8 +14,9 @@ const (
 )
 
 type App struct {
-	rmmzEngine rmmz.RmmzEngine
-	workers    int
+	rmmzEngine  rmmz.RmmzEngine
+	workers     int
+	pauseWaiter func(context.Context) error
 }
 
 func NewApp(
@@ -36,13 +37,29 @@ func NewApp(
 	}
 }
 
-func (a *App) Run(
-	gameDir string,
-) error {
-	return a.RunContext(context.Background(), gameDir)
+func (a *App) SetPauseWaiter(
+	waiter func(context.Context) error,
+) {
+	a.pauseWaiter = waiter
 }
 
-func (a *App) RunContext(
+func (a *App) waitIfResumed(
+	ctx context.Context,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if a.pauseWaiter != nil {
+		if err := a.pauseWaiter(ctx); err != nil {
+			return err
+		}
+	}
+
+	return ctx.Err()
+}
+
+func (a *App) Run(
 	ctx context.Context,
 	gameDir string,
 ) error {
@@ -51,6 +68,11 @@ func (a *App) RunContext(
 	}
 
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	ctx = rmmz.WithPauseWaiter(ctx, a.pauseWaiter)
+	if err := a.waitIfResumed(ctx); err != nil {
 		return err
 	}
 
@@ -66,6 +88,10 @@ func (a *App) RunContext(
 		}
 
 		reporter.FileDiscovered(filePath, 0)
+	}
+
+	if err := a.waitIfResumed(ctx); err != nil {
+		return err
 	}
 
 	mapFiles, err := a.rmmzEngine.FindMapFilesContext(ctx, gameDir)
@@ -103,6 +129,9 @@ func (a *App) RunContext(
 			return a.rmmzEngine.ProcessSystem(ctx, gameDir)
 		},
 		func(ctx context.Context) error {
+			return a.rmmzEngine.ProcessTroops(ctx, gameDir)
+		},
+		func(ctx context.Context) error {
 			return a.rmmzEngine.ProcessWeapons(ctx, gameDir)
 		},
 	}
@@ -128,7 +157,7 @@ func (a *App) RunContext(
 		currentJob := currentJob
 		group.Go(
 			func() error {
-				if err := groupContext.Err(); err != nil {
+				if err := a.waitIfResumed(groupContext); err != nil {
 					return err
 				}
 
