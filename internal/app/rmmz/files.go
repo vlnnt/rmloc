@@ -6,12 +6,6 @@ import (
 )
 
 func (a *RmmzEngine) DiscoverTranslationFiles(
-	gameDir string,
-) ([]string, error) {
-	return a.DiscoverTranslationFilesContext(context.Background(), gameDir)
-}
-
-func (a *RmmzEngine) DiscoverTranslationFilesContext(
 	ctx context.Context,
 	gameDir string,
 ) ([]string, error) {
@@ -60,6 +54,19 @@ func (a *RmmzEngine) DiscoverTranslationFilesContext(
 	}
 
 	addFile(armorsPath)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	commonEventsPath, err := findCommonEventsFile(gameDir)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"discover CommonEvents.json: %w",
+			err,
+		)
+	}
+
+	addFile(commonEventsPath)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

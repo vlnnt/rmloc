@@ -15,12 +15,6 @@ import (
 )
 
 func (a *RmmzEngine) ProcessActors(
-	gameDir string,
-) error {
-	return a.ProcessActorsContext(context.Background(), gameDir)
-}
-
-func (a *RmmzEngine) ProcessActorsContext(
 	ctx context.Context,
 	gameDir string,
 ) (resultErr error) {

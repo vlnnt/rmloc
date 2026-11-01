@@ -22,12 +22,6 @@ var mapFilePattern = regexp.MustCompile(
 )
 
 func (a *RmmzEngine) ProcessMap(
-	mapPath string,
-) error {
-	return a.ProcessMapContext(context.Background(), mapPath)
-}
-
-func (a *RmmzEngine) ProcessMapContext(
 	ctx context.Context,
 	mapPath string,
 ) (resultErr error) {

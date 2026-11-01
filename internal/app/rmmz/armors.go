@@ -15,12 +15,6 @@ import (
 )
 
 func (a *RmmzEngine) ProcessArmors(
-	gameDir string,
-) error {
-	return a.ProcessArmorsContext(context.Background(), gameDir)
-}
-
-func (a *RmmzEngine) ProcessArmorsContext(
 	ctx context.Context,
 	gameDir string,
 ) (resultErr error) {

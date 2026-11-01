@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	defaultWorkers = 2
+	defaultWorkers = 1
 	maxWorkers     = 4
 )
 
@@ -54,7 +54,7 @@ func (a *App) RunContext(
 		return err
 	}
 
-	translationFiles, err := a.rmmzEngine.DiscoverTranslationFilesContext(ctx, gameDir)
+	translationFiles, err := a.rmmzEngine.DiscoverTranslationFiles(ctx, gameDir)
 	if err != nil {
 		return err
 	}
@@ -76,25 +76,28 @@ func (a *App) RunContext(
 	type job func(context.Context) error
 	jobs := []job{
 		func(ctx context.Context) error {
-			return a.rmmzEngine.ProcessActorsContext(ctx, gameDir)
+			return a.rmmzEngine.ProcessActors(ctx, gameDir)
 		},
 		func(ctx context.Context) error {
-			return a.rmmzEngine.ProcessArmorsContext(ctx, gameDir)
+			return a.rmmzEngine.ProcessArmors(ctx, gameDir)
 		},
 		func(ctx context.Context) error {
-			return a.rmmzEngine.ProcessEnemiesContext(ctx, gameDir)
+			return a.rmmzEngine.ProcessCommonEvents(ctx, gameDir)
 		},
 		func(ctx context.Context) error {
-			return a.rmmzEngine.ProcessItemsContext(ctx, gameDir)
+			return a.rmmzEngine.ProcessEnemies(ctx, gameDir)
 		},
 		func(ctx context.Context) error {
-			return a.rmmzEngine.ProcessSkillsContext(ctx, gameDir)
+			return a.rmmzEngine.ProcessItems(ctx, gameDir)
 		},
 		func(ctx context.Context) error {
-			return a.rmmzEngine.ProcessStatesContext(ctx, gameDir)
+			return a.rmmzEngine.ProcessSkills(ctx, gameDir)
 		},
 		func(ctx context.Context) error {
-			return a.rmmzEngine.ProcessWeaponsContext(ctx, gameDir)
+			return a.rmmzEngine.ProcessStates(ctx, gameDir)
+		},
+		func(ctx context.Context) error {
+			return a.rmmzEngine.ProcessWeapons(ctx, gameDir)
 		},
 	}
 
@@ -103,7 +106,7 @@ func (a *App) RunContext(
 		jobs = append(
 			jobs,
 			func(ctx context.Context) error {
-				return a.rmmzEngine.ProcessMapContext(ctx, currentMapPath)
+				return a.rmmzEngine.ProcessMap(ctx, currentMapPath)
 			},
 		)
 	}

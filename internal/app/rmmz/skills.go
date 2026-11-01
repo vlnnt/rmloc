@@ -16,12 +16,6 @@ import (
 )
 
 func (a *RmmzEngine) ProcessSkills(
-	gameDir string,
-) error {
-	return a.ProcessSkillsContext(context.Background(), gameDir)
-}
-
-func (a *RmmzEngine) ProcessSkillsContext(
 	ctx context.Context,
 	gameDir string,
 ) (resultErr error) {

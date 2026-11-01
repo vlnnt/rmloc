@@ -16,12 +16,6 @@ import (
 )
 
 func (a *RmmzEngine) ProcessWeapons(
-	gameDir string,
-) error {
-	return a.ProcessWeaponsContext(context.Background(), gameDir)
-}
-
-func (a *RmmzEngine) ProcessWeaponsContext(
 	ctx context.Context,
 	gameDir string,
 ) (resultErr error) {

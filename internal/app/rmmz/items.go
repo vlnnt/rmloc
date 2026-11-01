@@ -16,15 +16,6 @@ import (
 )
 
 func (a *RmmzEngine) ProcessItems(
-	gameDir string,
-) error {
-	return a.ProcessItemsContext(
-		context.Background(),
-		gameDir,
-	)
-}
-
-func (a *RmmzEngine) ProcessItemsContext(
 	ctx context.Context,
 	gameDir string,
 ) (resultErr error) {
