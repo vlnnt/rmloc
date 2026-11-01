@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint & Test
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test -race ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          args: --timeout=5m
+
+  build-linux:
+    name: Build Linux
+    needs: lint
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build RMLOC
+        run: |
+          mkdir -p dist/rmloc-linux
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags="-s -w" \
+            -o dist/rmloc-linux/rmloc ./cmd/rmloc
+
+      - name: Copy prompts
+        run: cp -r prompts dist/rmloc-linux/prompts
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rmloc-linux-amd64
+          path: dist/rmloc-linux/
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows
+    needs: lint
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build RMLOC
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/rmloc-windows
+          go build -trimpath -ldflags="-s -w" -o dist/rmloc-windows/rmloc.exe ./cmd/rmloc
+
+      - name: Copy prompts
+        shell: pwsh
+        run: Copy-Item -Path prompts -Destination dist/rmloc-windows/prompts -Recurse
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rmloc-windows-amd64
+          path: dist/rmloc-windows/
+          if-no-files-found: error

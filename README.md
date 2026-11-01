@@ -1,10 +1,8 @@
 # RMLOC
 
+**Language:** English | [Русский](README.ru.md)
+
 Terminal translator for **RPG Maker MZ** games using local AI models through [Ollama](https://ollama.com/).
-
-> Currently, RMLOC supports only **RPG Maker MZ** projects and works only with **Ollama**. Support for other RPG Maker versions and translation providers may be added later.
-
-Supports translation of actors, items, skills, enemies, equipment, states and `MapXXX.json` files. Includes a TUI with progress tracking, parallel processing, cancellation, backups and a persistent translation cache.
 
 ## Requirements
 
@@ -13,7 +11,7 @@ Supports translation of actors, items, skills, enemies, equipment, states and `M
 - Any compatible Ollama model, for example:
 
 ```bash
-ollama pull qwen2.5:1.5b
+ollama pull qwen3:4b-instruct
 ollama serve
 ```
 
@@ -57,4 +55,4 @@ Original files are moved to the `old` directory. Translation cache is stored in 
 
 ## License
 
-Apache-2.0
+Apache License 2.0
