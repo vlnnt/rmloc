@@ -136,6 +136,32 @@ func (a *RmmzEngine) DiscoverTranslationFiles(
 		return nil, err
 	}
 
+	systemPath, err := findSystemFile(gameDir)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"discover System.json: %w",
+			err,
+		)
+	}
+
+	addFile(systemPath)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	troopsPath, err := findTroopsFile(gameDir)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"discover Troops.json: %w",
+			err,
+		)
+	}
+
+	addFile(troopsPath)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	weaponsPath, err := findWeaponsFile(gameDir)
 	if err != nil {
 		return nil, fmt.Errorf(

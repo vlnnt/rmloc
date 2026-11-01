@@ -100,6 +100,9 @@ func (a *App) RunContext(
 			return a.rmmzEngine.ProcessStates(ctx, gameDir)
 		},
 		func(ctx context.Context) error {
+			return a.rmmzEngine.ProcessSystem(ctx, gameDir)
+		},
+		func(ctx context.Context) error {
 			return a.rmmzEngine.ProcessWeapons(ctx, gameDir)
 		},
 	}
