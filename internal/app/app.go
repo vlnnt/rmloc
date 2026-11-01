@@ -82,6 +82,9 @@ func (a *App) RunContext(
 			return a.rmmzEngine.ProcessArmors(ctx, gameDir)
 		},
 		func(ctx context.Context) error {
+			return a.rmmzEngine.ProcessClasses(ctx, gameDir)
+		},
+		func(ctx context.Context) error {
 			return a.rmmzEngine.ProcessCommonEvents(ctx, gameDir)
 		},
 		func(ctx context.Context) error {

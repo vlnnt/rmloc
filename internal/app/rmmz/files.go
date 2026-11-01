@@ -58,6 +58,19 @@ func (a *RmmzEngine) DiscoverTranslationFiles(
 		return nil, err
 	}
 
+	classesPath, err := findClassesFile(gameDir)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"discover Classes.json: %w",
+			err,
+		)
+	}
+
+	addFile(classesPath)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	commonEventsPath, err := findCommonEventsFile(gameDir)
 	if err != nil {
 		return nil, fmt.Errorf(
