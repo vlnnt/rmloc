@@ -92,7 +92,7 @@ func (c *Client) Translate(
 		}
 
 		if strings.TrimSpace(response.Translation) == "" {
-			lastErr = fmt.Errorf("Ollama returned an empty translation")
+			lastErr = fmt.Errorf("ollama returned an empty translation")
 			continue
 		}
 
@@ -328,7 +328,7 @@ func (c *Client) translateMultiple(
 
 		if len(response.Translations) != len(lines) {
 			lastErr = fmt.Errorf(
-				"Ollama returned %d lines, expected %d",
+				"ollama returned %d lines, expected %d",
 				len(response.Translations),
 				len(lines),
 			)
@@ -444,7 +444,7 @@ func (c *Client) chat(
 		}
 	}
 
-	return fmt.Errorf("Ollama request attempts exhausted!")
+	return fmt.Errorf("ollama request attempts exhausted")
 }
 
 func (c *Client) executeChatRequest(
@@ -488,7 +488,7 @@ func (c *Client) executeChatRequest(
 		return status == fasthttp.StatusTooManyRequests ||
 				status >= fasthttp.StatusInternalServerError,
 			fmt.Errorf(
-				"Ollama returned HTTP %d: %s",
+				"ollama returned HTTP %d: %s",
 				status,
 				strings.TrimSpace(string(responseBody)),
 			)
@@ -500,12 +500,12 @@ func (c *Client) executeChatRequest(
 	}
 
 	if responseData.Error != "" {
-		return false, fmt.Errorf("Ollama error: %s", responseData.Error)
+		return false, fmt.Errorf("ollama error: %s", responseData.Error)
 	}
 
 	content := strings.TrimSpace(responseData.Message.Content)
 	if content == "" {
-		return true, fmt.Errorf("Ollama returned empty content!")
+		return true, fmt.Errorf("ollama returned empty content")
 	}
 
 	if err := json.Unmarshal([]byte(content), result); err != nil {

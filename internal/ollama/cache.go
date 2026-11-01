@@ -39,7 +39,9 @@ func (c *Client) EnablePersistentCache(
 	}
 
 	if err == nil {
-		defer file.Close()
+		defer func() {
+			_ = file.Close()
+		}()
 
 		scanner := bufio.NewScanner(file)
 		scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)

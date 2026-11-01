@@ -188,7 +188,10 @@ func (a *RmmzEngine) ProcessMap(
 		)
 	}
 
-	defer os.Remove(tempPath)
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -487,7 +490,7 @@ func (a *RmmzEngine) FindMapFilesContext(
 			return nil, err
 		}
 
-		files, err := readMapFilesContext(ctx, candidate)
+		files, err := readMapFiles(ctx, candidate)
 		if err != nil {
 			return nil, err
 		}
@@ -713,12 +716,6 @@ func applyMapCommandTranslation(
 }
 
 func readMapFiles(
-	dataDir string,
-) ([]string, error) {
-	return readMapFilesContext(context.Background(), dataDir)
-}
-
-func readMapFilesContext(
 	ctx context.Context,
 	dataDir string,
 ) ([]string, error) {

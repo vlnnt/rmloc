@@ -129,7 +129,10 @@ func (a *RmmzEngine) ProcessEnemies(
 		)
 	}
 
-	defer os.Remove(tempPath)
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}

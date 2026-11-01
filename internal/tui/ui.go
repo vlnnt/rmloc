@@ -521,12 +521,12 @@ func (u *UI) readSettings() (Config, error) {
 
 	ollamaURL := strings.TrimSpace(u.ollamaInput.GetText())
 	if ollamaURL == "" {
-		return Config{}, fmt.Errorf("Ollama address is not specified")
+		return Config{}, fmt.Errorf("ollama address is not specified")
 	}
 
 	model := strings.TrimSpace(u.modelInput.GetText())
 	if model == "" {
-		return Config{}, fmt.Errorf("Ollama model is not specified")
+		return Config{}, fmt.Errorf("ollama model is not specified")
 	}
 
 	promptPath := strings.TrimSpace(u.promptInput.GetText())

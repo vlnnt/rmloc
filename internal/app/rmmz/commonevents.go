@@ -193,7 +193,10 @@ func (a *RmmzEngine) ProcessCommonEvents(
 		)
 	}
 
-	defer os.Remove(tempPath)
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}

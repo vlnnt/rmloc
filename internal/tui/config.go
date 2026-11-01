@@ -24,11 +24,11 @@ func (c Config) Validate() error {
 	}
 
 	if strings.TrimSpace(c.OllamaURL) == "" {
-		return fmt.Errorf("Ollama URL is empty")
+		return fmt.Errorf("ollama URL is empty")
 	}
 
 	if strings.TrimSpace(c.Model) == "" {
-		return fmt.Errorf("Ollama model is empty")
+		return fmt.Errorf("ollama model is empty")
 	}
 
 	if strings.TrimSpace(c.PromptPath) == "" {
@@ -138,7 +138,9 @@ func SaveConfig(
 		)
 	}
 
-	defer os.Remove(tempFile.Name())
+	defer func() {
+		_ = os.Remove(tempFile.Name())
+	}()
 
 	if err := tempFile.Chmod(0o600); err != nil {
 		_ = tempFile.Close()

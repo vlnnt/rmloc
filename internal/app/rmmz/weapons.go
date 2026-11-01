@@ -117,7 +117,10 @@ func (a *RmmzEngine) ProcessWeapons(
 		return fmt.Errorf("write temporary Weapons.json: %w", err)
 	}
 
-	defer os.Remove(tempPath)
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}

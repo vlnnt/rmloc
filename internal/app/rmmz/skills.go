@@ -117,7 +117,10 @@ func (a *RmmzEngine) ProcessSkills(
 		return fmt.Errorf("write temporary Skills.json: %w", err)
 	}
 
-	defer os.Remove(tempPath)
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}

@@ -126,7 +126,10 @@ func (a *RmmzEngine) ProcessClasses(
 		)
 	}
 
-	defer os.Remove(tempPath)
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}
