@@ -15,15 +15,6 @@ import (
 )
 
 func (a *RmmzEngine) ProcessArmors(
-	gameDir string,
-) error {
-	return a.ProcessArmorsContext(
-		context.Background(),
-		gameDir,
-	)
-}
-
-func (a *RmmzEngine) ProcessArmorsContext(
 	ctx context.Context,
 	gameDir string,
 ) (resultErr error) {
@@ -69,51 +60,25 @@ func (a *RmmzEngine) ProcessArmorsContext(
 	}
 
 	reporter := a.Reporter()
-	reporter.FileDiscovered(
-		armorsPath,
-		len(texts),
-	)
-
-	reporter.FileStarted(
-		armorsPath,
-	)
+	reporter.FileDiscovered(armorsPath, len(texts))
+	reporter.FileStarted(armorsPath)
 
 	defer func() {
 		switch {
 		case resultErr == nil:
-			reporter.FileCompleted(
-				armorsPath,
-			)
+			reporter.FileCompleted(armorsPath)
 
-		case errors.Is(
-			resultErr,
-			context.Canceled,
-		) ||
-			errors.Is(
-				resultErr,
-				context.DeadlineExceeded,
-			):
-			reporter.FileCanceled(
-				armorsPath,
-			)
+		case errors.Is(resultErr, context.Canceled) ||
+			errors.Is(resultErr, context.DeadlineExceeded):
+			reporter.FileCanceled(armorsPath)
 
 		default:
-			reporter.FileFailed(
-				armorsPath,
-				resultErr,
-			)
+			reporter.FileFailed(armorsPath, resultErr)
 		}
 	}()
 
-	fmt.Printf(
-		"Found file: %s\n",
-		armorsPath,
-	)
-
-	fmt.Printf(
-		"Found text entries: %d\n",
-		len(texts),
-	)
+	fmt.Printf("Found file: %s\n", armorsPath)
+	fmt.Printf("Found text entries: %d\n", len(texts))
 
 	if err := translateTextEntries(
 		ctx,
@@ -121,20 +86,13 @@ func (a *RmmzEngine) ProcessArmorsContext(
 		reporter,
 		armorsPath,
 		texts,
-		func(
-			text *armors.ArmorText,
-		) string {
+		func(text *armors.ArmorText) string {
 			return text.Text
 		},
-		func(
-			text *armors.ArmorText,
-			translation string,
-		) {
+		func(text *armors.ArmorText, translation string) {
 			text.Text = translation
 		},
-		func(
-			text *armors.ArmorText,
-		) string {
+		func(text *armors.ArmorText) string {
 			return fmt.Sprintf(
 				"armor=%d field=%s",
 				text.ArmorID,
@@ -152,10 +110,7 @@ func (a *RmmzEngine) ProcessArmorsContext(
 		return err
 	}
 
-	translatedData, err := applyArmorTranslations(
-		sourceData,
-		texts,
-	)
+	translatedData, err := applyArmorTranslations(sourceData, texts)
 	if err != nil {
 		return err
 	}
@@ -176,23 +131,16 @@ func (a *RmmzEngine) ProcessArmorsContext(
 		)
 	}
 
-	defer os.Remove(
-		tempPath,
-	)
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	oldDir := filepath.Join(
-		filepath.Dir(armorsPath),
-		"old",
-	)
-
-	if err := os.MkdirAll(
-		oldDir,
-		0o755,
-	); err != nil {
+	oldDir := filepath.Join(filepath.Dir(armorsPath), "old")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
 		return fmt.Errorf(
 			"create old directory: %w",
 			err,
@@ -201,39 +149,23 @@ func (a *RmmzEngine) ProcessArmorsContext(
 
 	backupName := fmt.Sprintf(
 		"Armors_%s.json",
-		time.Now().Format(
-			"20060102_150405",
-		),
+		time.Now().Format("20060102_150405"),
 	)
 
-	backupPath := filepath.Join(
-		oldDir,
-		backupName,
-	)
-
+	backupPath := filepath.Join(oldDir, backupName)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	if err := os.Rename(
-		armorsPath,
-		backupPath,
-	); err != nil {
+	if err := os.Rename(armorsPath, backupPath); err != nil {
 		return fmt.Errorf(
 			"move original Armors.json: %w",
 			err,
 		)
 	}
 
-	if err := os.Rename(
-		tempPath,
-		armorsPath,
-	); err != nil {
-		restoreErr := os.Rename(
-			backupPath,
-			armorsPath,
-		)
-
+	if err := os.Rename(tempPath, armorsPath); err != nil {
+		restoreErr := os.Rename(backupPath, armorsPath)
 		if restoreErr != nil {
 			return fmt.Errorf(
 				"replace Armors.json: %w; restore original: %v",
@@ -242,21 +174,11 @@ func (a *RmmzEngine) ProcessArmorsContext(
 			)
 		}
 
-		return fmt.Errorf(
-			"replace Armors.json: %w",
-			err,
-		)
+		return fmt.Errorf("replace Armors.json: %w", err)
 	}
 
-	fmt.Printf(
-		"Translation saved: %s\n",
-		armorsPath,
-	)
-
-	fmt.Printf(
-		"Original file backed up: %s\n\n",
-		backupPath,
-	)
+	fmt.Printf("Translation saved: %s\n", armorsPath)
+	fmt.Printf("Original file backed up: %s\n\n", backupPath)
 
 	return nil
 }
@@ -339,9 +261,7 @@ func findArmorsFile(
 				return nil
 			}
 
-			if filepath.Base(
-				filepath.Dir(path),
-			) != "data" {
+			if filepath.Base(filepath.Dir(path)) != "data" {
 				return nil
 			}
 
@@ -371,10 +291,7 @@ func applyArmorTranslations(
 	texts []armors.ArmorText,
 ) ([]byte, error) {
 	var records []map[string]any
-	if err := json.Unmarshal(
-		sourceData,
-		&records,
-	); err != nil {
+	if err := json.Unmarshal(sourceData, &records); err != nil {
 		return nil, fmt.Errorf(
 			"decode Armors.json: %w",
 			err,
@@ -402,16 +319,10 @@ func applyArmorTranslations(
 	}
 
 	var output bytes.Buffer
-	encoder := json.NewEncoder(
-		&output,
-	)
-
-	encoder.SetIndent(
-		"",
-		"  ",
-	)
-
+	encoder := json.NewEncoder(&output)
+	encoder.SetIndent("", "  ")
 	encoder.SetEscapeHTML(false)
+
 	if err := encoder.Encode(records); err != nil {
 		return nil, fmt.Errorf(
 			"encode Armors.json: %w",

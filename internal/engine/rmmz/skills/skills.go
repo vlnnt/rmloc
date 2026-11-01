@@ -25,21 +25,10 @@ func Extract(
 			continue
 		}
 
-		texts = appendSkillText(
-			texts, skill.ID, skillIndex, "name", skill.Name,
-		)
-
-		texts = appendSkillText(
-			texts, skill.ID, skillIndex, "description", skill.Description,
-		)
-
-		texts = appendSkillText(
-			texts, skill.ID, skillIndex, "message1", skill.Message1,
-		)
-
-		texts = appendSkillText(
-			texts, skill.ID, skillIndex, "message2", skill.Message2,
-		)
+		texts = appendSkillText(texts, skill.ID, skillIndex, "name", skill.Name)
+		texts = appendSkillText(texts, skill.ID, skillIndex, "description", skill.Description)
+		texts = appendSkillText(texts, skill.ID, skillIndex, "message1", skill.Message1)
+		texts = appendSkillText(texts, skill.ID, skillIndex, "message2", skill.Message2)
 	}
 
 	return texts, nil

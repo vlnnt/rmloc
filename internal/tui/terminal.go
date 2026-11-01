@@ -13,9 +13,7 @@ func runTviewApplication(
 	application *tview.Application,
 ) error {
 	if application == nil {
-		return fmt.Errorf(
-			"tview application is nil",
-		)
+		return fmt.Errorf("tview application is nil")
 	}
 
 	var (
@@ -25,9 +23,7 @@ func runTviewApplication(
 	)
 
 	application.SetAfterDrawFunc(
-		func(
-			screen tcell.Screen,
-		) {
+		func(screen tcell.Screen) {
 			redirectOnce.Do(
 				func() {
 					restoreOutput, redirectErr = redirectStandardOutput()
@@ -48,20 +44,10 @@ func runTviewApplication(
 	return redirectErr
 }
 
-func redirectStandardOutput() (
-	func(),
-	error,
-) {
-	nullOutput, err := os.OpenFile(
-		os.DevNull,
-		os.O_WRONLY,
-		0,
-	)
+func redirectStandardOutput() (func(), error) {
+	nullOutput, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"open null output: %w",
-			err,
-		)
+		return nil, fmt.Errorf("open null output: %w", err)
 	}
 
 	originalOutput := os.Stdout

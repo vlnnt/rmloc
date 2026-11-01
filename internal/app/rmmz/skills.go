@@ -16,15 +16,6 @@ import (
 )
 
 func (a *RmmzEngine) ProcessSkills(
-	gameDir string,
-) error {
-	return a.ProcessSkillsContext(
-		context.Background(),
-		gameDir,
-	)
-}
-
-func (a *RmmzEngine) ProcessSkillsContext(
 	ctx context.Context,
 	gameDir string,
 ) (resultErr error) {
@@ -47,74 +38,39 @@ func (a *RmmzEngine) ProcessSkillsContext(
 
 	sourceData, err := os.ReadFile(skillsPath)
 	if err != nil {
-		return fmt.Errorf(
-			"read Skills.json: %w",
-			err,
-		)
+		return fmt.Errorf("read Skills.json: %w", err)
 	}
 
 	fileInfo, err := os.Stat(skillsPath)
 	if err != nil {
-		return fmt.Errorf(
-			"stat Skills.json: %w",
-			err,
-		)
+		return fmt.Errorf("stat Skills.json: %w", err)
 	}
 
 	texts, err := skills.Extract(skillsPath)
 	if err != nil {
-		return fmt.Errorf(
-			"extract Skills.json: %w",
-			err,
-		)
+		return fmt.Errorf("extract Skills.json: %w", err)
 	}
 
 	reporter := a.Reporter()
-	reporter.FileDiscovered(
-		skillsPath,
-		len(texts),
-	)
-
-	reporter.FileStarted(
-		skillsPath,
-	)
+	reporter.FileDiscovered(skillsPath, len(texts))
+	reporter.FileStarted(skillsPath)
 
 	defer func() {
 		switch {
 		case resultErr == nil:
-			reporter.FileCompleted(
-				skillsPath,
-			)
+			reporter.FileCompleted(skillsPath)
 
-		case errors.Is(
-			resultErr,
-			context.Canceled,
-		) ||
-			errors.Is(
-				resultErr,
-				context.DeadlineExceeded,
-			):
-			reporter.FileCanceled(
-				skillsPath,
-			)
+		case errors.Is(resultErr, context.Canceled) ||
+			errors.Is(resultErr, context.DeadlineExceeded):
+			reporter.FileCanceled(skillsPath)
 
 		default:
-			reporter.FileFailed(
-				skillsPath,
-				resultErr,
-			)
+			reporter.FileFailed(skillsPath, resultErr)
 		}
 	}()
 
-	fmt.Printf(
-		"Found file: %s\n",
-		skillsPath,
-	)
-
-	fmt.Printf(
-		"Found text entries: %d\n",
-		len(texts),
-	)
+	fmt.Printf("Found file: %s\n", skillsPath)
+	fmt.Printf("Found text entries: %d\n", len(texts))
 
 	if err := translateTextEntries(
 		ctx,
@@ -122,20 +78,13 @@ func (a *RmmzEngine) ProcessSkillsContext(
 		reporter,
 		skillsPath,
 		texts,
-		func(
-			text *skills.SkillText,
-		) string {
+		func(text *skills.SkillText) string {
 			return text.Text
 		},
-		func(
-			text *skills.SkillText,
-			translation string,
-		) {
+		func(text *skills.SkillText, translation string) {
 			text.Text = translation
 		},
-		func(
-			text *skills.SkillText,
-		) string {
+		func(text *skills.SkillText) string {
 			return fmt.Sprintf(
 				"skill=%d field=%s",
 				text.SkillID,
@@ -143,20 +92,14 @@ func (a *RmmzEngine) ProcessSkillsContext(
 			)
 		},
 	); err != nil {
-		return fmt.Errorf(
-			"translate Skills.json: %w",
-			err,
-		)
+		return fmt.Errorf("translate Skills.json: %w", err)
 	}
 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	translatedData, err := applySkillTranslations(
-		sourceData,
-		texts,
-	)
+	translatedData, err := applySkillTranslations(sourceData, texts)
 	if err != nil {
 		return err
 	}
@@ -171,70 +114,39 @@ func (a *RmmzEngine) ProcessSkillsContext(
 		translatedData,
 		fileInfo.Mode().Perm(),
 	); err != nil {
-		return fmt.Errorf(
-			"write temporary Skills.json: %w",
-			err,
-		)
+		return fmt.Errorf("write temporary Skills.json: %w", err)
 	}
 
-	defer os.Remove(
-		tempPath,
-	)
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	oldDir := filepath.Join(
-		filepath.Dir(skillsPath),
-		"old",
-	)
-
-	if err := os.MkdirAll(
-		oldDir,
-		0o755,
-	); err != nil {
-		return fmt.Errorf(
-			"create old directory: %w",
-			err,
-		)
+	oldDir := filepath.Join(filepath.Dir(skillsPath), "old")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		return fmt.Errorf("create old directory: %w", err)
 	}
 
 	backupName := fmt.Sprintf(
 		"Skills_%s.json",
-		time.Now().Format(
-			"20060102_150405",
-		),
+		time.Now().Format("20060102_150405"),
 	)
 
-	backupPath := filepath.Join(
-		oldDir,
-		backupName,
-	)
+	backupPath := filepath.Join(oldDir, backupName)
 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	if err := os.Rename(
-		skillsPath,
-		backupPath,
-	); err != nil {
-		return fmt.Errorf(
-			"move original Skills.json: %w",
-			err,
-		)
+	if err := os.Rename(skillsPath, backupPath); err != nil {
+		return fmt.Errorf("move original Skills.json: %w", err)
 	}
 
-	if err := os.Rename(
-		tempPath,
-		skillsPath,
-	); err != nil {
-		restoreErr := os.Rename(
-			backupPath,
-			skillsPath,
-		)
-
+	if err := os.Rename(tempPath, skillsPath); err != nil {
+		restoreErr := os.Rename(backupPath, skillsPath)
 		if restoreErr != nil {
 			return fmt.Errorf(
 				"replace Skills.json: %w; restore original: %v",
@@ -243,21 +155,11 @@ func (a *RmmzEngine) ProcessSkillsContext(
 			)
 		}
 
-		return fmt.Errorf(
-			"replace Skills.json: %w",
-			err,
-		)
+		return fmt.Errorf("replace Skills.json: %w", err)
 	}
 
-	fmt.Printf(
-		"Translation saved: %s\n",
-		skillsPath,
-	)
-
-	fmt.Printf(
-		"Original file backed up: %s\n\n",
-		backupPath,
-	)
+	fmt.Printf("Translation saved: %s\n", skillsPath)
+	fmt.Printf("Original file backed up: %s\n\n", backupPath)
 
 	return nil
 }
@@ -341,9 +243,7 @@ func findSkillsFile(
 			}
 
 			if !strings.EqualFold(
-				filepath.Base(
-					filepath.Dir(path),
-				),
+				filepath.Base(filepath.Dir(path)),
 				"data",
 			) {
 				return nil
@@ -375,10 +275,7 @@ func applySkillTranslations(
 	texts []skills.SkillText,
 ) ([]byte, error) {
 	var records []map[string]any
-	if err := json.Unmarshal(
-		sourceData,
-		&records,
-	); err != nil {
+	if err := json.Unmarshal(sourceData, &records); err != nil {
 		return nil, fmt.Errorf(
 			"decode Skills.json: %w",
 			err,
@@ -406,16 +303,10 @@ func applySkillTranslations(
 	}
 
 	var output bytes.Buffer
-	encoder := json.NewEncoder(
-		&output,
-	)
-
-	encoder.SetIndent(
-		"",
-		"  ",
-	)
-
+	encoder := json.NewEncoder(&output)
+	encoder.SetIndent("", "  ")
 	encoder.SetEscapeHTML(false)
+
 	if err := encoder.Encode(records); err != nil {
 		return nil, fmt.Errorf(
 			"encode Skills.json: %w",

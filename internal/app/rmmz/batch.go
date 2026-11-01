@@ -11,6 +11,42 @@ import (
 
 const databaseTranslationBatchSize = 8
 
+type pauseWaiterKey struct{}
+
+func WithPauseWaiter(
+	ctx context.Context,
+	waiter func(context.Context) error,
+) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if waiter == nil {
+		return ctx
+	}
+
+	return context.WithValue(ctx, pauseWaiterKey{}, waiter)
+}
+
+func waitForTranslationResume(
+	ctx context.Context,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	waiter, ok := ctx.Value(pauseWaiterKey{}).(func(context.Context) error)
+	if !ok {
+		return nil
+	}
+
+	if err := waiter(ctx); err != nil {
+		return err
+	}
+
+	return ctx.Err()
+}
+
 func translateTextEntries[T any](
 	ctx context.Context,
 	client *ollama.Client,
@@ -38,35 +74,25 @@ func translateTextEntries[T any](
 	}
 
 	for start := 0; start < len(entries); start += databaseTranslationBatchSize {
-		if err := ctx.Err(); err != nil {
+		if err := waitForTranslationResume(ctx); err != nil {
 			return err
 		}
 
 		end := start + databaseTranslationBatchSize
-
 		if end > len(entries) {
 			end = len(entries)
 		}
 
-		sourceTexts := make(
-			[]string,
-			end-start,
-		)
-
+		sourceTexts := make([]string, end-start)
 		for index := start; index < end; index++ {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 
-			sourceTexts[index-start] = getText(
-				&entries[index],
-			)
+			sourceTexts[index-start] = getText(&entries[index])
 		}
 
-		translations, err := client.TranslateBatchContext(
-			ctx,
-			sourceTexts,
-		)
+		translations, err := client.TranslateBatch(ctx, sourceTexts)
 		if err != nil {
 			return fmt.Errorf(
 				"translate text entries %d-%d of %d: %w",
@@ -93,30 +119,19 @@ func translateTextEntries[T any](
 			}
 
 			entryIndex := start + offset
-			translation = strings.TrimSpace(
-				translation,
-			)
-
+			translation = strings.TrimSpace(translation)
 			if translation == "" {
 				return fmt.Errorf(
 					"empty translation for entry %d: %s",
 					entryIndex,
-					describe(
-						&entries[entryIndex],
-					),
+					describe(&entries[entryIndex]),
 				)
 			}
 
-			setText(
-				&entries[entryIndex],
-				translation,
-			)
+			setText(&entries[entryIndex], translation)
 		}
 
-		reporter.FileAdvanced(
-			filePath,
-			end-start,
-		)
+		reporter.FileAdvanced(filePath, end-start)
 	}
 
 	return nil

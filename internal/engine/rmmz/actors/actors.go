@@ -25,17 +25,9 @@ func Extract(
 			continue
 		}
 
-		texts = appendActorText(
-			texts, actor.ID, actorIndex, "name", actor.Name,
-		)
-
-		texts = appendActorText(
-			texts, actor.ID, actorIndex, "nickname", actor.Nickname,
-		)
-
-		texts = appendActorText(
-			texts, actor.ID, actorIndex, "profile", actor.Profile,
-		)
+		texts = appendActorText(texts, actor.ID, actorIndex, "name", actor.Name)
+		texts = appendActorText(texts, actor.ID, actorIndex, "nickname", actor.Nickname)
+		texts = appendActorText(texts, actor.ID, actorIndex, "profile", actor.Profile)
 	}
 
 	return texts, nil

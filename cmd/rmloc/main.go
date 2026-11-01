@@ -8,9 +8,6 @@ import (
 
 func main() {
 	if err := tui.Run(); err != nil {
-		log.Fatalf(
-			"Failed to run rmloc: %v",
-			err,
-		)
+		log.Fatalf("Failed to run rmloc: %v", err)
 	}
 }

@@ -25,13 +25,8 @@ func Extract(
 			continue
 		}
 
-		texts = appendWeaponText(
-			texts, weapon.ID, weaponIndex, "name", weapon.Name,
-		)
-
-		texts = appendWeaponText(
-			texts, weapon.ID, weaponIndex, "description", weapon.Description,
-		)
+		texts = appendWeaponText(texts, weapon.ID, weaponIndex, "name", weapon.Name)
+		texts = appendWeaponText(texts, weapon.ID, weaponIndex, "description", weapon.Description)
 	}
 
 	return texts, nil

@@ -16,15 +16,6 @@ import (
 )
 
 func (a *RmmzEngine) ProcessItems(
-	gameDir string,
-) error {
-	return a.ProcessItemsContext(
-		context.Background(),
-		gameDir,
-	)
-}
-
-func (a *RmmzEngine) ProcessItemsContext(
 	ctx context.Context,
 	gameDir string,
 ) (resultErr error) {
@@ -70,51 +61,26 @@ func (a *RmmzEngine) ProcessItemsContext(
 	}
 
 	reporter := a.Reporter()
-	reporter.FileDiscovered(
-		itemsPath,
-		len(texts),
-	)
-
-	reporter.FileStarted(
-		itemsPath,
-	)
+	reporter.FileDiscovered(itemsPath, len(texts))
+	reporter.FileStarted(itemsPath)
 
 	defer func() {
 		switch {
 		case resultErr == nil:
-			reporter.FileCompleted(
-				itemsPath,
-			)
+			reporter.FileCompleted(itemsPath)
 
-		case errors.Is(
-			resultErr,
-			context.Canceled,
-		) ||
-			errors.Is(
-				resultErr,
-				context.DeadlineExceeded,
-			):
-			reporter.FileCanceled(
-				itemsPath,
-			)
+		case errors.Is(resultErr, context.Canceled) ||
+			errors.Is(resultErr, context.DeadlineExceeded):
+			reporter.FileCanceled(itemsPath)
 
 		default:
-			reporter.FileFailed(
-				itemsPath,
-				resultErr,
-			)
+			reporter.FileFailed(itemsPath, resultErr)
 		}
 	}()
 
-	fmt.Printf(
-		"Found file: %s\n",
-		itemsPath,
-	)
+	fmt.Printf("Found file: %s\n", itemsPath)
 
-	fmt.Printf(
-		"Found text entries: %d\n",
-		len(texts),
-	)
+	fmt.Printf("Found text entries: %d\n", len(texts))
 
 	if err := translateTextEntries(
 		ctx,
@@ -122,20 +88,14 @@ func (a *RmmzEngine) ProcessItemsContext(
 		reporter,
 		itemsPath,
 		texts,
-		func(
-			text *items.ItemText,
-		) string {
+		func(text *items.ItemText) string {
 			return text.Text
 		},
-		func(
-			text *items.ItemText,
-			translation string,
+		func(text *items.ItemText, translation string,
 		) {
 			text.Text = translation
 		},
-		func(
-			text *items.ItemText,
-		) string {
+		func(text *items.ItemText) string {
 			return fmt.Sprintf(
 				"item=%d field=%s",
 				text.ItemID,
@@ -153,10 +113,7 @@ func (a *RmmzEngine) ProcessItemsContext(
 		return err
 	}
 
-	translatedData, err := applyItemTranslations(
-		sourceData,
-		texts,
-	)
+	translatedData, err := applyItemTranslations(sourceData, texts)
 	if err != nil {
 		return err
 	}
@@ -177,23 +134,16 @@ func (a *RmmzEngine) ProcessItemsContext(
 		)
 	}
 
-	defer os.Remove(
-		tempPath,
-	)
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	oldDir := filepath.Join(
-		filepath.Dir(itemsPath),
-		"old",
-	)
-
-	if err := os.MkdirAll(
-		oldDir,
-		0o755,
-	); err != nil {
+	oldDir := filepath.Join(filepath.Dir(itemsPath), "old")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
 		return fmt.Errorf(
 			"create old directory: %w",
 			err,
@@ -202,34 +152,22 @@ func (a *RmmzEngine) ProcessItemsContext(
 
 	backupName := fmt.Sprintf(
 		"Items_%s.json",
-		time.Now().Format(
-			"20060102_150405",
-		),
+		time.Now().Format("20060102_150405"),
 	)
 
-	backupPath := filepath.Join(
-		oldDir,
-		backupName,
-	)
-
+	backupPath := filepath.Join(oldDir, backupName)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	if err := os.Rename(
-		itemsPath,
-		backupPath,
-	); err != nil {
+	if err := os.Rename(itemsPath, backupPath); err != nil {
 		return fmt.Errorf(
 			"move original Items.json: %w",
 			err,
 		)
 	}
 
-	if err := os.Rename(
-		tempPath,
-		itemsPath,
-	); err != nil {
+	if err := os.Rename(tempPath, itemsPath); err != nil {
 		restoreErr := os.Rename(
 			backupPath,
 			itemsPath,
@@ -243,21 +181,11 @@ func (a *RmmzEngine) ProcessItemsContext(
 			)
 		}
 
-		return fmt.Errorf(
-			"replace Items.json: %w",
-			err,
-		)
+		return fmt.Errorf("replace Items.json: %w", err)
 	}
 
-	fmt.Printf(
-		"Translation saved: %s\n",
-		itemsPath,
-	)
-
-	fmt.Printf(
-		"Original file backed up: %s\n\n",
-		backupPath,
-	)
+	fmt.Printf("Translation saved: %s\n", itemsPath)
+	fmt.Printf("Original file backed up: %s\n\n", backupPath)
 
 	return nil
 }
@@ -341,9 +269,7 @@ func findItemsFile(
 			}
 
 			if !strings.EqualFold(
-				filepath.Base(
-					filepath.Dir(path),
-				),
+				filepath.Base(filepath.Dir(path)),
 				"data",
 			) {
 				return nil
@@ -375,11 +301,7 @@ func applyItemTranslations(
 	texts []items.ItemText,
 ) ([]byte, error) {
 	var records []map[string]any
-
-	if err := json.Unmarshal(
-		sourceData,
-		&records,
-	); err != nil {
+	if err := json.Unmarshal(sourceData, &records); err != nil {
 		return nil, fmt.Errorf(
 			"decode Items.json: %w",
 			err,
@@ -407,16 +329,10 @@ func applyItemTranslations(
 	}
 
 	var output bytes.Buffer
-	encoder := json.NewEncoder(
-		&output,
-	)
-
-	encoder.SetIndent(
-		"",
-		"  ",
-	)
-
+	encoder := json.NewEncoder(&output)
+	encoder.SetIndent("", "  ")
 	encoder.SetEscapeHTML(false)
+
 	if err := encoder.Encode(records); err != nil {
 		return nil, fmt.Errorf(
 			"encode Items.json: %w",

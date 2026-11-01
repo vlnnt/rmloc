@@ -16,15 +16,6 @@ import (
 )
 
 func (a *RmmzEngine) ProcessWeapons(
-	gameDir string,
-) error {
-	return a.ProcessWeaponsContext(
-		context.Background(),
-		gameDir,
-	)
-}
-
-func (a *RmmzEngine) ProcessWeaponsContext(
 	ctx context.Context,
 	gameDir string,
 ) (resultErr error) {
@@ -36,9 +27,7 @@ func (a *RmmzEngine) ProcessWeaponsContext(
 		return err
 	}
 
-	weaponsPath, err := findWeaponsFile(
-		gameDir,
-	)
+	weaponsPath, err := findWeaponsFile(gameDir)
 	if err != nil {
 		return err
 	}
@@ -47,82 +36,41 @@ func (a *RmmzEngine) ProcessWeaponsContext(
 		return err
 	}
 
-	sourceData, err := os.ReadFile(
-		weaponsPath,
-	)
+	sourceData, err := os.ReadFile(weaponsPath)
 	if err != nil {
-		return fmt.Errorf(
-			"read Weapons.json: %w",
-			err,
-		)
+		return fmt.Errorf("read Weapons.json: %w", err)
 	}
 
-	fileInfo, err := os.Stat(
-		weaponsPath,
-	)
+	fileInfo, err := os.Stat(weaponsPath)
 	if err != nil {
-		return fmt.Errorf(
-			"stat Weapons.json: %w",
-			err,
-		)
+		return fmt.Errorf("stat Weapons.json: %w", err)
 	}
 
-	texts, err := weapons.Extract(
-		weaponsPath,
-	)
+	texts, err := weapons.Extract(weaponsPath)
 	if err != nil {
-		return fmt.Errorf(
-			"extract Weapons.json: %w",
-			err,
-		)
+		return fmt.Errorf("extract Weapons.json: %w", err)
 	}
 
 	reporter := a.Reporter()
-	reporter.FileDiscovered(
-		weaponsPath,
-		len(texts),
-	)
-
-	reporter.FileStarted(
-		weaponsPath,
-	)
+	reporter.FileDiscovered(weaponsPath, len(texts))
+	reporter.FileStarted(weaponsPath)
 
 	defer func() {
 		switch {
 		case resultErr == nil:
-			reporter.FileCompleted(
-				weaponsPath,
-			)
+			reporter.FileCompleted(weaponsPath)
 
-		case errors.Is(
-			resultErr,
-			context.Canceled,
-		) ||
-			errors.Is(
-				resultErr,
-				context.DeadlineExceeded,
-			):
-			reporter.FileCanceled(
-				weaponsPath,
-			)
+		case errors.Is(resultErr, context.Canceled) ||
+			errors.Is(resultErr, context.DeadlineExceeded):
+			reporter.FileCanceled(weaponsPath)
 
 		default:
-			reporter.FileFailed(
-				weaponsPath,
-				resultErr,
-			)
+			reporter.FileFailed(weaponsPath, resultErr)
 		}
 	}()
 
-	fmt.Printf(
-		"Found file: %s\n",
-		weaponsPath,
-	)
-
-	fmt.Printf(
-		"Found text entries: %d\n",
-		len(texts),
-	)
+	fmt.Printf("Found file: %s\n", weaponsPath)
+	fmt.Printf("Found text entries: %d\n", len(texts))
 
 	if err := translateTextEntries(
 		ctx,
@@ -130,20 +78,13 @@ func (a *RmmzEngine) ProcessWeaponsContext(
 		reporter,
 		weaponsPath,
 		texts,
-		func(
-			text *weapons.WeaponText,
-		) string {
+		func(text *weapons.WeaponText) string {
 			return text.Text
 		},
-		func(
-			text *weapons.WeaponText,
-			translation string,
-		) {
+		func(text *weapons.WeaponText, translation string) {
 			text.Text = translation
 		},
-		func(
-			text *weapons.WeaponText,
-		) string {
+		func(text *weapons.WeaponText) string {
 			return fmt.Sprintf(
 				"weapon=%d field=%s",
 				text.WeaponID,
@@ -151,20 +92,14 @@ func (a *RmmzEngine) ProcessWeaponsContext(
 			)
 		},
 	); err != nil {
-		return fmt.Errorf(
-			"translate Weapons.json: %w",
-			err,
-		)
+		return fmt.Errorf("translate Weapons.json: %w", err)
 	}
 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	translatedData, err := applyWeaponTranslations(
-		sourceData,
-		texts,
-	)
+	translatedData, err := applyWeaponTranslations(sourceData, texts)
 	if err != nil {
 		return err
 	}
@@ -179,72 +114,38 @@ func (a *RmmzEngine) ProcessWeaponsContext(
 		translatedData,
 		fileInfo.Mode().Perm(),
 	); err != nil {
-		return fmt.Errorf(
-			"write temporary Weapons.json: %w",
-			err,
-		)
+		return fmt.Errorf("write temporary Weapons.json: %w", err)
 	}
 
-	defer os.Remove(
-		tempPath,
-	)
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	oldDir := filepath.Join(
-		filepath.Dir(
-			weaponsPath,
-		),
-		"old",
-	)
-
-	if err := os.MkdirAll(
-		oldDir,
-		0o755,
-	); err != nil {
-		return fmt.Errorf(
-			"create old directory: %w",
-			err,
-		)
+	oldDir := filepath.Join(filepath.Dir(weaponsPath), "old")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		return fmt.Errorf("create old directory: %w", err)
 	}
 
 	backupName := fmt.Sprintf(
 		"Weapons_%s.json",
-		time.Now().Format(
-			"20060102_150405",
-		),
+		time.Now().Format("20060102_150405"),
 	)
 
-	backupPath := filepath.Join(
-		oldDir,
-		backupName,
-	)
-
+	backupPath := filepath.Join(oldDir, backupName)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	if err := os.Rename(
-		weaponsPath,
-		backupPath,
-	); err != nil {
-		return fmt.Errorf(
-			"move original Weapons.json: %w",
-			err,
-		)
+	if err := os.Rename(weaponsPath, backupPath); err != nil {
+		return fmt.Errorf("move original Weapons.json: %w", err)
 	}
 
-	if err := os.Rename(
-		tempPath,
-		weaponsPath,
-	); err != nil {
-		restoreErr := os.Rename(
-			backupPath,
-			weaponsPath,
-		)
-
+	if err := os.Rename(tempPath, weaponsPath); err != nil {
+		restoreErr := os.Rename(backupPath, weaponsPath)
 		if restoreErr != nil {
 			return fmt.Errorf(
 				"replace Weapons.json: %w; restore original: %v",
@@ -253,21 +154,11 @@ func (a *RmmzEngine) ProcessWeaponsContext(
 			)
 		}
 
-		return fmt.Errorf(
-			"replace Weapons.json: %w",
-			err,
-		)
+		return fmt.Errorf("replace Weapons.json: %w", err)
 	}
 
-	fmt.Printf(
-		"Translation saved: %s\n",
-		weaponsPath,
-	)
-
-	fmt.Printf(
-		"Original file backed up: %s\n\n",
-		backupPath,
-	)
+	fmt.Printf("Translation saved: %s\n", weaponsPath)
+	fmt.Printf("Original file backed up: %s\n\n", backupPath)
 
 	return nil
 }
@@ -275,31 +166,18 @@ func (a *RmmzEngine) ProcessWeaponsContext(
 func findWeaponsFile(
 	gameDir string,
 ) (string, error) {
-	rootDir, err := filepath.Abs(
-		gameDir,
-	)
+	rootDir, err := filepath.Abs(gameDir)
 	if err != nil {
-		return "", fmt.Errorf(
-			"resolve game directory: %w",
-			err,
-		)
+		return "", fmt.Errorf("resolve game directory: %w", err)
 	}
 
-	info, err := os.Stat(
-		rootDir,
-	)
+	info, err := os.Stat(rootDir)
 	if err != nil {
-		return "", fmt.Errorf(
-			"open game directory: %w",
-			err,
-		)
+		return "", fmt.Errorf("open game directory: %w", err)
 	}
 
 	if !info.IsDir() {
-		return "", fmt.Errorf(
-			"game path is not a directory: %s",
-			rootDir,
-		)
+		return "", fmt.Errorf("game path is not a directory: %s", rootDir)
 	}
 
 	candidates := []string{
@@ -321,9 +199,7 @@ func findWeaponsFile(
 	}
 
 	for _, candidate := range candidates {
-		if isFile(
-			candidate,
-		) {
+		if isFile(candidate) {
 			return candidate, nil
 		}
 	}
@@ -356,14 +232,7 @@ func findWeaponsFile(
 				return nil
 			}
 
-			if !strings.EqualFold(
-				filepath.Base(
-					filepath.Dir(
-						path,
-					),
-				),
-				"data",
-			) {
+			if !strings.EqualFold(filepath.Base(filepath.Dir(path)), "data") {
 				return nil
 			}
 
@@ -372,17 +241,11 @@ func findWeaponsFile(
 		},
 	)
 	if err != nil {
-		return "", fmt.Errorf(
-			"search Weapons.json: %w",
-			err,
-		)
+		return "", fmt.Errorf("search Weapons.json: %w", err)
 	}
 
 	if weaponsPath == "" {
-		return "", fmt.Errorf(
-			"data/Weapons.json not found inside: %s",
-			rootDir,
-		)
+		return "", fmt.Errorf("data/Weapons.json not found inside: %s", rootDir)
 	}
 
 	return weaponsPath, nil
@@ -393,14 +256,8 @@ func applyWeaponTranslations(
 	texts []weapons.WeaponText,
 ) ([]byte, error) {
 	var records []map[string]any
-	if err := json.Unmarshal(
-		sourceData,
-		&records,
-	); err != nil {
-		return nil, fmt.Errorf(
-			"decode Weapons.json: %w",
-			err,
-		)
+	if err := json.Unmarshal(sourceData, &records); err != nil {
+		return nil, fmt.Errorf("decode Weapons.json: %w", err)
 	}
 
 	for _, text := range texts {
@@ -424,26 +281,12 @@ func applyWeaponTranslations(
 	}
 
 	var output bytes.Buffer
-	encoder := json.NewEncoder(
-		&output,
-	)
+	encoder := json.NewEncoder(&output)
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
 
-	encoder.SetIndent(
-		"",
-		"  ",
-	)
-
-	encoder.SetEscapeHTML(
-		false,
-	)
-
-	if err := encoder.Encode(
-		records,
-	); err != nil {
-		return nil, fmt.Errorf(
-			"encode Weapons.json: %w",
-			err,
-		)
+	if err := encoder.Encode(records); err != nil {
+		return nil, fmt.Errorf("encode Weapons.json: %w", err)
 	}
 
 	return output.Bytes(), nil

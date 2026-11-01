@@ -13,72 +13,31 @@ import (
 )
 
 const (
-	translationNumCtx = 4096
-
-	singleTranslationNumPredict = 512
-
-	batchTranslationNumPredict = 1536
-	batchTranslationMaxTexts   = 8
-	batchTranslationMaxRunes   = 2400
-
-	dialogueTranslationNumPredict = 1536
-
-	maxTranslationValidationAttempts = 3
-	translationValidationRetryDelay  = 500 * time.Millisecond
+	translationNumCtx        = 4096
+	singleNumPredict         = 512
+	multipleNumPredict       = 1536
+	batchTranslationMaxTexts = 8
+	batchTranslationMaxRunes = 2400
+	validationAttempts       = 3
+	requestAttempts          = 2
 )
 
 func NewClient(
-	baseURL string,
-	model string,
+	baseURL, model string,
 	prompts PromptConfig,
 ) (*Client, error) {
-	baseURL = strings.TrimRight(
-		strings.TrimSpace(baseURL),
-		"/",
-	)
-	if baseURL == "" {
-		return nil, fmt.Errorf(
-			"Ollama base URL is empty",
-		)
-	}
-
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	model = strings.TrimSpace(model)
-	if model == "" {
-		return nil, fmt.Errorf(
-			"Ollama model is empty",
-		)
-	}
 
 	if err := prompts.validate(); err != nil {
-		return nil, fmt.Errorf(
-			"validate prompts: %w",
-			err,
-		)
+		return nil, err
 	}
 
-	legacyPromptHash := prompts.LegacyFingerprint()
 	return &Client{
-		baseURL: baseURL,
-		model:   model,
-
-		singleTranslationPrompt: strings.TrimSpace(
-			prompts.SingleTranslation,
-		),
-		batchTranslationPrompt: strings.TrimSpace(
-			prompts.BatchTranslation,
-		),
-		dialogueTranslationPrompt: strings.TrimSpace(
-			prompts.DialogueTranslation,
-		),
-
-		legacyPromptHash:   legacyPromptHash,
-		singlePromptHash:   prompts.SingleFingerprint(),
-		batchPromptHash:    prompts.BatchFingerprint(),
-		dialoguePromptHash: prompts.DialogueFingerprint(),
-
-		allowLegacyCache: legacyPromptHash ==
-			legacyDefaultPromptHash,
-
+		baseURL:    baseURL,
+		model:      model,
+		prompt:     strings.TrimSpace(prompts.Prompt),
+		promptHash: prompts.Fingerprint(),
 		httpClient: &fasthttp.Client{
 			ReadTimeout:  5 * time.Minute,
 			WriteTimeout: 10 * time.Second,
@@ -88,1401 +47,474 @@ func NewClient(
 }
 
 func (c *Client) Translate(
-	text string,
-) (string, error) {
-	return c.TranslateContext(
-		context.Background(),
-		text,
-	)
-}
-
-func (c *Client) TranslateContext(
 	ctx context.Context,
 	text string,
-) (string, error) {
-	return c.translate(
-		normalizeContext(ctx),
-		text,
-		true,
-	)
-}
-
-func (c *Client) translate(
-	ctx context.Context,
-	text string,
-	recordInput bool,
 ) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
-	}
-
-	if recordInput {
-		c.recordInputTexts(1)
 	}
 
 	if strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf(
-			"text is empty",
-		)
+		return "", fmt.Errorf("text is empty")
 	}
 
 	if !needsTranslation(text) {
-		c.recordSkippedTexts(1)
-
 		return text, nil
 	}
 
-	if cached, exists := c.translationCache.Load(text); exists {
-		translation, ok := cached.(string)
-		if !ok {
-			return "", fmt.Errorf(
-				"invalid cached translation type",
-			)
+	if cached, ok := c.translationCache.Load(text); ok {
+		return cached.(string), nil
+	}
+
+	protected := protectText(text)
+	var lastErr error
+
+	for attempt := 0; attempt < validationAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
 		}
 
-		c.recordCacheHit(1)
-		return translation, nil
-	}
+		prompt := c.prompt
+		if attempt > 0 {
+			prompt += "\nThe previous translation was invalid. Preserve every protected marker exactly once and return valid JSON."
+		}
 
-	requestKey := "translation:" + text
-	value, err, _ := c.doSingleflightContext(
-		ctx,
-		requestKey,
-		func() (any, error) {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
+		var response translationResponse
+		if err := c.chat(
+			ctx,
+			prompt,
+			protected.Text,
+			responseFormat,
+			singleNumPredict,
+			&response,
+		); err != nil {
+			return "", err
+		}
 
-			if cached, exists := c.translationCache.Load(text); exists {
-				translation, ok := cached.(string)
-				if !ok {
-					return nil, fmt.Errorf(
-						"invalid cached translation type",
-					)
-				}
+		if strings.TrimSpace(response.Translation) == "" {
+			lastErr = fmt.Errorf("ollama returned an empty translation")
+			continue
+		}
 
-				c.recordCacheHit(1)
-				return translation, nil
-			}
-
-			protected := protectText(text)
-			restoredTranslation, err := c.translateProtectedText(
-				ctx,
-				protected,
-			)
-			if err != nil {
-				if !isTranslationValidationError(err) {
-					return nil, err
-				}
-
-				if persistErr := c.persistTranslation(
-					text,
-					text,
-				); persistErr != nil {
-					return nil, fmt.Errorf(
-						"persist unchanged translation: %w",
-						persistErr,
-					)
-				}
-
-				c.storeTranslationCacheEntry(
-					text,
-					text,
-				)
-
-				c.recordSafetyFallback(1)
-				fmt.Printf(
-					"Warning: the text could not be translated safely; "+
-						"the original text was left unchanged. "+
-						"Text: %q. Reason: %v\n",
-					truncateForLog(
-						text,
-						180,
-					),
-					err,
-				)
-
-				return text, nil
-			}
-
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-
-			if err := c.persistTranslation(
-				text,
-				restoredTranslation,
-			); err != nil {
-				return nil, fmt.Errorf(
-					"persist translation: %w",
-					err,
-				)
-			}
-
-			c.storeTranslationCacheEntry(
-				text,
-				restoredTranslation,
-			)
-
-			c.recordModelTranslatedTexts(1)
-			return restoredTranslation, nil
-		},
-	)
-	if err != nil {
-		return "", err
-	}
-
-	translation, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf(
-			"invalid translation result type",
+		translated, err := protected.restore(
+			strings.TrimSpace(response.Translation),
 		)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if strings.TrimSpace(translated) == "" {
+			lastErr = fmt.Errorf("translation is empty after restoring markers")
+			continue
+		}
+
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+
+		if err := c.persistTranslation(text, translated); err != nil {
+			return "", fmt.Errorf("save translation cache: %w", err)
+		}
+
+		c.storeTranslationCacheEntry(text, translated)
+		return translated, nil
 	}
 
-	return translation, nil
+	fmt.Printf(
+		"Warning: translation failed for %q: %v. Keeping original.\n",
+		text,
+		lastErr,
+	)
+
+	return text, nil
 }
 
 func (c *Client) TranslateBatch(
-	texts []string,
-) ([]string, error) {
-	return c.TranslateBatchContext(
-		context.Background(),
-		texts,
-	)
-}
-
-func (c *Client) TranslateBatchContext(
 	ctx context.Context,
 	texts []string,
 ) ([]string, error) {
-	ctx = normalizeContext(ctx)
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	c.recordInputTexts(
-		len(texts),
-	)
-
 	if len(texts) == 0 {
-		return nil, fmt.Errorf(
-			"texts are empty",
-		)
+		return nil, fmt.Errorf("texts are empty")
 	}
 
 	result := copyStrings(texts)
-	entries := make(
-		[]batchTextEntry,
-		0,
-		len(texts),
-	)
+	indexes := make(map[string][]int, len(texts))
+	pending := make([]string, 0, len(texts))
 
-	entryByText := make(
-		map[string]int,
-		len(texts),
-	)
-
-	for index, text := range texts {
+	for i, text := range texts {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
-		if strings.TrimSpace(text) == "" {
-			c.recordSkippedTexts(1)
+		if strings.TrimSpace(text) == "" || !needsTranslation(text) {
 			continue
 		}
 
-		if !needsTranslation(text) {
-			c.recordSkippedTexts(1)
+		if cached, ok := c.translationCache.Load(text); ok {
+			result[i] = cached.(string)
 			continue
 		}
 
-		if cached, exists := c.translationCache.Load(text); exists {
-			translation, ok := cached.(string)
-			if !ok {
-				return nil, fmt.Errorf(
-					"invalid cached translation type",
-				)
+		if _, exists := indexes[text]; !exists {
+			pending = append(pending, text)
+		}
+
+		indexes[text] = append(indexes[text], i)
+	}
+
+	for start := 0; start < len(pending); {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		end, runes := start, 0
+		for end < len(pending) && end-start < batchTranslationMaxTexts {
+			count := utf8.RuneCountInString(pending[end])
+			if end > start && runes+count > batchTranslationMaxRunes {
+				break
 			}
 
-			result[index] = translation
-			c.recordCacheHit(1)
-			continue
+			runes += count
+			end++
 		}
 
-		if entryIndex, exists := entryByText[text]; exists {
-			entries[entryIndex].indexes = append(
-				entries[entryIndex].indexes,
-				index,
-			)
+		chunk := pending[start:end]
+		var translations []string
 
-			continue
+		if len(chunk) == 1 {
+			one, err := c.Translate(ctx, chunk[0])
+			if err != nil {
+				return nil, err
+			}
+			translations = []string{one}
+
+		} else {
+			var err error
+			translations, err = c.translateMultiple(ctx, chunk, false)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"translate batch %d-%d: %w",
+					start,
+					end-1,
+					err,
+				)
+			}
 		}
 
-		entryByText[text] = len(entries)
-		entries = append(
-			entries,
-			batchTextEntry{
-				text: text,
-				indexes: []int{
-					index,
-				},
-			},
-		)
-	}
+		for i, original := range chunk {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 
-	if len(entries) == 0 {
-		return result, nil
-	}
+			translated := translations[i]
+			if _, cached := c.translationCache.Load(original); !cached {
+				if err := c.persistTranslation(original, translated); err != nil {
+					return nil, fmt.Errorf("save batch translation: %w", err)
+				}
 
-	pendingTexts := make(
-		[]string,
-		len(entries),
-	)
+				c.storeTranslationCacheEntry(original, translated)
+			}
 
-	for index := range entries {
-		pendingTexts[index] = entries[index].text
-	}
-
-	translations, err := c.translateBatchTexts(
-		ctx,
-		pendingTexts,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(translations) != len(entries) {
-		return nil, fmt.Errorf(
-			"batch translation count mismatch: received %d, expected %d",
-			len(translations),
-			len(entries),
-		)
-	}
-
-	for entryIndex, entry := range entries {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+			for _, resultIndex := range indexes[original] {
+				result[resultIndex] = translated
+			}
 		}
-
-		translation := translations[entryIndex]
-		for _, resultIndex := range entry.indexes {
-			result[resultIndex] = translation
-		}
-
-		if len(entry.indexes) > 1 {
-			c.recordCacheHit(
-				len(entry.indexes) - 1,
-			)
-		}
-	}
-
-	return result, nil
-}
-
-func (c *Client) translateBatchTexts(
-	ctx context.Context,
-	texts []string,
-) ([]string, error) {
-	result := make(
-		[]string,
-		0,
-		len(texts),
-	)
-
-	for start := 0; start < len(texts); {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		end := batchTextEnd(
-			texts,
-			start,
-		)
-
-		translations, err := c.translateBatchChunk(
-			ctx,
-			texts[start:end],
-		)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"translate batch elements %d-%d: %w",
-				start,
-				end-1,
-				err,
-			)
-		}
-
-		result = append(
-			result,
-			translations...,
-		)
-
 		start = end
 	}
 
 	return result, nil
 }
 
-func batchTextEnd(
-	texts []string,
-	start int,
-) int {
-	if start < 0 ||
-		start >= len(texts) {
-		return start
-	}
-
-	end := start
-	totalRunes := 0
-
-	for end < len(texts) &&
-		end-start < batchTranslationMaxTexts {
-		textRunes := utf8.RuneCountInString(
-			texts[end],
-		)
-
-		if end > start &&
-			totalRunes+textRunes > batchTranslationMaxRunes {
-			break
-		}
-
-		totalRunes += textRunes
-		end++
-	}
-
-	if end == start {
-		return start + 1
-	}
-
-	return end
-}
-
-func (c *Client) translateBatchChunk(
-	ctx context.Context,
-	texts []string,
-) ([]string, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	if len(texts) == 0 {
-		return nil, nil
-	}
-
-	result := make(
-		[]string,
-		len(texts),
-	)
-
-	pendingTexts := make(
-		[]string,
-		0,
-		len(texts),
-	)
-
-	pendingIndexes := make(
-		[]int,
-		0,
-		len(texts),
-	)
-
-	for index, text := range texts {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		if cached, exists := c.translationCache.Load(text); exists {
-			translation, ok := cached.(string)
-			if !ok {
-				return nil, fmt.Errorf(
-					"invalid cached translation type",
-				)
-			}
-
-			result[index] = translation
-			c.recordCacheHit(1)
-
-			continue
-		}
-
-		pendingTexts = append(
-			pendingTexts,
-			text,
-		)
-
-		pendingIndexes = append(
-			pendingIndexes,
-			index,
-		)
-	}
-
-	if len(pendingTexts) == 0 {
-		return result, nil
-	}
-
-	translations, err := c.translateBatchRequest(
-		ctx,
-		pendingTexts,
-	)
-	if err != nil {
-		if !isTranslationValidationError(err) {
-			return nil, err
-		}
-
-		if len(pendingTexts) == 1 {
-			translation, lineErr := c.translate(
-				ctx,
-				pendingTexts[0],
-				false,
-			)
-			if lineErr != nil {
-				return nil, fmt.Errorf(
-					"translate batch element separately: %w",
-					lineErr,
-				)
-			}
-
-			translations = []string{
-				translation,
-			}
-		} else {
-			fmt.Printf(
-				"Warning: the batch translation of %d independent texts "+
-					"failed validation; the batch will be split. "+
-					"Reason: %v\n",
-				len(pendingTexts),
-				err,
-			)
-
-			middle := len(pendingTexts) / 2
-			leftTranslations, leftErr := c.translateBatchChunk(
-				ctx,
-				pendingTexts[:middle],
-			)
-			if leftErr != nil {
-				return nil, leftErr
-			}
-
-			rightTranslations, rightErr := c.translateBatchChunk(
-				ctx,
-				pendingTexts[middle:],
-			)
-			if rightErr != nil {
-				return nil, rightErr
-			}
-
-			translations = append(
-				leftTranslations,
-				rightTranslations...,
-			)
-		}
-	}
-
-	if len(translations) != len(pendingTexts) {
-		return nil, fmt.Errorf(
-			"batch translation count mismatch after fallback: received %d, expected %d",
-			len(translations),
-			len(pendingTexts),
-		)
-	}
-
-	for index, pendingIndex := range pendingIndexes {
-		result[pendingIndex] = translations[index]
-	}
-
-	return result, nil
-}
-
-func (c *Client) translateBatchRequest(
-	ctx context.Context,
-	texts []string,
-) ([]string, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	protectedLines, protectedValues := protectLines(
-		texts,
-	)
-
-	restoredTranslations, err := c.translateProtectedBatch(
-		ctx,
-		protectedLines,
-		protectedValues,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	for index, translation := range restoredTranslations {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		if err := c.persistBatchTranslation(
-			texts[index],
-			translation,
-		); err != nil {
-			return nil, fmt.Errorf(
-				"persist batch translation %d: %w",
-				index,
-				err,
-			)
-		}
-
-		c.storeTranslationCacheEntry(
-			texts[index],
-			translation,
-		)
-	}
-
-	c.recordModelTranslatedTexts(
-		len(texts),
-	)
-
-	return copyStrings(
-		restoredTranslations,
-	), nil
-}
-
 func (c *Client) TranslateLines(
-	lines []string,
-) ([]string, error) {
-	return c.TranslateLinesContext(
-		context.Background(),
-		lines,
-	)
-}
-
-func (c *Client) TranslateLinesContext(
 	ctx context.Context,
 	lines []string,
 ) ([]string, error) {
-	ctx = normalizeContext(ctx)
-
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
-	c.recordInputTexts(
-		len(lines),
-	)
 
 	if len(lines) == 0 {
-		return nil, fmt.Errorf(
-			"lines are empty",
-		)
+		return nil, fmt.Errorf("lines are empty")
 	}
 
 	if !needsAnyTranslation(lines) {
-		c.recordSkippedTexts(
-			len(lines),
-		)
-
 		return copyStrings(lines), nil
 	}
 
-	originalRequestBody, err := json.Marshal(
-		translationLinesRequest{
-			Lines: lines,
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"marshal original dialogue lines: %w",
-			err,
-		)
-	}
-
-	cacheKey := string(
-		originalRequestBody,
-	)
-
-	if cached, exists := c.dialogueCache.Load(cacheKey); exists {
-		translations, ok := cached.([]string)
-		if !ok {
-			return nil, fmt.Errorf(
-				"invalid cached dialogue translation type",
-			)
-		}
-
-		c.recordCacheHit(
-			len(lines),
-		)
-
-		return copyStrings(
-			translations,
-		), nil
-	}
-
-	requestKey := "dialogue:" + cacheKey
-	value, err, _ := c.doSingleflightContext(
-		ctx,
-		requestKey,
-		func() (any, error) {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-
-			if cached, exists := c.dialogueCache.Load(cacheKey); exists {
-				translations, ok := cached.([]string)
-				if !ok {
-					return nil, fmt.Errorf(
-						"invalid cached dialogue translation type",
-					)
-				}
-
-				c.recordCacheHit(
-					len(lines),
-				)
-
-				return copyStrings(
-					translations,
-				), nil
-			}
-
-			protectedLines, protectedValues := protectLines(
-				lines,
-			)
-
-			restoredTranslations, err := c.translateProtectedLines(
-				ctx,
-				protectedLines,
-				protectedValues,
-			)
-			if err != nil {
-				if !isTranslationValidationError(err) {
-					return nil, err
-				}
-
-				fmt.Printf(
-					"Warning: the grouped translation of %d lines "+
-						"failed validation; the lines will be translated "+
-						"individually. Reason: %v\n",
-					len(lines),
-					err,
-				)
-
-				fallbackTranslations := make(
-					[]string,
-					len(lines),
-				)
-
-				for index, line := range lines {
-					if err := ctx.Err(); err != nil {
-						return nil, err
-					}
-
-					translation, lineErr := c.translate(
-						ctx,
-						line,
-						false,
-					)
-					if lineErr != nil {
-						return nil, fmt.Errorf(
-							"translate dialogue line %d separately: %w",
-							index,
-							lineErr,
-						)
-					}
-
-					fallbackTranslations[index] = translation
-				}
-
-				if persistErr := c.persistDialogue(
-					cacheKey,
-					fallbackTranslations,
-				); persistErr != nil {
-					return nil, fmt.Errorf(
-						"persist fallback dialogue translation: %w",
-						persistErr,
-					)
-				}
-
-				c.storeDialogueCacheEntry(
-					cacheKey,
-					fallbackTranslations,
-				)
-
-				return copyStrings(
-					fallbackTranslations,
-				), nil
-			}
-
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-
-			if err := c.persistDialogue(
-				cacheKey,
-				restoredTranslations,
-			); err != nil {
-				return nil, fmt.Errorf(
-					"persist dialogue translation: %w",
-					err,
-				)
-			}
-
-			c.storeDialogueCacheEntry(
-				cacheKey,
-				restoredTranslations,
-			)
-
-			c.recordModelTranslatedTexts(
-				len(lines),
-			)
-
-			return copyStrings(
-				restoredTranslations,
-			), nil
-		},
-	)
+	body, err := json.Marshal(translationLinesRequest{
+		Lines: lines,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	translations, ok := value.([]string)
-	if !ok {
-		return nil, fmt.Errorf(
-			"invalid dialogue translation result type",
-		)
+	key := string(body)
+	if cached, ok := c.dialogueCache.Load(key); ok {
+		return copyStrings(cached.([]string)), nil
 	}
 
-	return copyStrings(
-		translations,
-	), nil
-}
-
-func (c *Client) translateProtectedText(
-	ctx context.Context,
-	protected protectedText,
-) (string, error) {
-	var lastValidationErr error
-	for attempt := 1; attempt <= maxTranslationValidationAttempts; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-
-		prompt := c.singleTranslationPrompt
-		if attempt > 1 {
-			prompt = validationRetryPrompt(
-				c.singleTranslationPrompt,
-				lastValidationErr,
-				false,
-			)
-		}
-
-		var result translationResponse
-		if err := c.chat(
-			ctx,
-			prompt,
-			protected.Text,
-			responseFormat,
-			singleTranslationNumPredict,
-			translationNumCtx,
-			&result,
-		); err != nil {
-			if isStructuredResponseError(err) {
-				return "", &translationValidationError{
-					attempts: maxRequestAttempts,
-					err:      err,
-				}
-			}
-
-			return "", err
-		}
-
-		restoredTranslation, validationErr := validateTranslation(
-			result.Translation,
-			protected,
-		)
-		if validationErr == nil {
-			return restoredTranslation, nil
-		}
-
-		lastValidationErr = validationErr
-		if attempt < maxTranslationValidationAttempts {
-			c.recordRetryAttempt()
-
-			if err := waitForRetry(
-				ctx,
-				translationValidationRetryDelay,
-			); err != nil {
-				return "", err
-			}
-		}
-	}
-
-	return "", &translationValidationError{
-		attempts: maxTranslationValidationAttempts,
-		err:      lastValidationErr,
-	}
-}
-
-func (c *Client) translateProtectedBatch(
-	ctx context.Context,
-	protectedLines []string,
-	protectedValues []protectedText,
-) ([]string, error) {
-	return c.translateProtectedMultiple(
-		ctx,
-		c.batchTranslationPrompt,
-		protectedLines,
-		protectedValues,
-		translationLinesResponseFormat,
-		batchTranslationNumPredict,
-		translationNumCtx,
-	)
-}
-
-func (c *Client) translateProtectedLines(
-	ctx context.Context,
-	protectedLines []string,
-	protectedValues []protectedText,
-) ([]string, error) {
-	return c.translateProtectedMultiple(
-		ctx,
-		c.dialogueTranslationPrompt,
-		protectedLines,
-		protectedValues,
-		dialogueLinesResponseFormat,
-		dialogueTranslationNumPredict,
-		translationNumCtx,
-	)
-}
-
-func (c *Client) translateProtectedMultiple(
-	ctx context.Context,
-	basePrompt string,
-	protectedLines []string,
-	protectedValues []protectedText,
-	responseSchema json.RawMessage,
-	numPredict int,
-	numCtx int,
-) ([]string, error) {
-	protectedRequestBody, err := json.Marshal(
-		translationLinesRequest{
-			Lines: protectedLines,
-		},
-	)
+	translated, err := c.translateMultiple(ctx, lines, true)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"marshal protected translation elements: %w",
-			err,
-		)
+		return nil, err
 	}
 
-	var lastValidationErr error
-	for attempt := 1; attempt <= maxTranslationValidationAttempts; attempt++ {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := c.persistDialogue(key, translated); err != nil {
+		return nil, fmt.Errorf("save dialogue cache: %w", err)
+	}
+
+	c.storeDialogueCacheEntry(key, translated)
+	return copyStrings(translated), nil
+}
+
+func (c *Client) translateMultiple(
+	ctx context.Context,
+	lines []string,
+	related bool,
+) ([]string, error) {
+	protectedLines, protectedValues := protectLines(lines)
+	body, err := json.Marshal(translationLinesRequest{Lines: protectedLines})
+	if err != nil {
+		return nil, err
+	}
+
+	prompt := c.prompt
+	if related {
+		prompt += "\nUse neighboring lines as context. Preserve the array length and order."
+	} else {
+		prompt += "\nTranslate array elements independently. Preserve the array length and order."
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < validationAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
-		prompt := basePrompt
-		if attempt > 1 {
-			prompt = validationRetryPrompt(
-				basePrompt,
-				lastValidationErr,
-				true,
-			)
+		currentPrompt := prompt
+		if attempt > 0 {
+			currentPrompt += "\nThe previous translation was invalid. Keep every protected marker in its original array element and return valid JSON."
 		}
 
-		var result translationLinesResponse
+		var response translationLinesResponse
 		if err := c.chat(
 			ctx,
-			prompt,
-			string(protectedRequestBody),
-			responseSchema,
-			numPredict,
-			numCtx,
-			&result,
+			currentPrompt,
+			string(body),
+			translationLinesResponseFormat,
+			multipleNumPredict,
+			&response,
 		); err != nil {
-			if isStructuredResponseError(err) {
-				return nil, &translationValidationError{
-					attempts: maxRequestAttempts,
-					err:      err,
-				}
-			}
-
-			return nil, err
-		}
-
-		restoredTranslations, validationErr := validateTranslations(
-			result.Translations,
-			protectedValues,
-		)
-		if validationErr == nil {
-			return restoredTranslations, nil
-		}
-
-		lastValidationErr = validationErr
-		if attempt < maxTranslationValidationAttempts {
-			c.recordRetryAttempt()
-
-			if err := waitForRetry(
-				ctx,
-				translationValidationRetryDelay,
-			); err != nil {
+			var syntaxErr *json.SyntaxError
+			if !errors.As(err, &syntaxErr) {
 				return nil, err
 			}
+
+			lastErr = err
+			break
+		}
+
+		if len(response.Translations) != len(lines) {
+			lastErr = fmt.Errorf(
+				"ollama returned %d lines, expected %d",
+				len(response.Translations),
+				len(lines),
+			)
+			continue
+		}
+
+		translated := make([]string, len(lines))
+		valid := true
+
+		for i, value := range response.Translations {
+			if strings.TrimSpace(value) == "" {
+				lastErr = fmt.Errorf("empty translation at index %d", i)
+				valid = false
+				break
+			}
+
+			restored, err := protectedValues[i].restore(
+				strings.TrimSpace(value),
+			)
+			if err != nil {
+				lastErr = fmt.Errorf("line %d: %w", i, err)
+				valid = false
+				break
+			}
+
+			if strings.TrimSpace(restored) == "" {
+				lastErr = fmt.Errorf("empty translation after restoring line %d", i)
+				valid = false
+				break
+			}
+
+			translated[i] = restored
+		}
+
+		if valid {
+			return translated, nil
 		}
 	}
 
-	return nil, &translationValidationError{
-		attempts: maxTranslationValidationAttempts,
-		err:      lastValidationErr,
-	}
-}
+	result := make([]string, len(lines))
+	for i, line := range lines {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 
-func validateTranslation(
-	translation string,
-	protected protectedText,
-) (string, error) {
-	translation = strings.TrimSpace(
-		translation,
-	)
+		if strings.TrimSpace(line) == "" {
+			result[i] = line
+			continue
+		}
 
-	if translation == "" {
-		return "", fmt.Errorf(
-			"Ollama returned empty translation",
-		)
-	}
-
-	restoredTranslation, err := protected.restore(
-		translation,
-	)
-	if err != nil {
-		return "", fmt.Errorf(
-			"restore protected translation: %w",
-			err,
-		)
-	}
-
-	restoredTranslation = strings.TrimSpace(
-		restoredTranslation,
-	)
-
-	if restoredTranslation == "" {
-		return "", fmt.Errorf(
-			"Ollama returned empty translation after restoring protected values",
-		)
-	}
-
-	return restoredTranslation, nil
-}
-
-func validateTranslations(
-	translations []string,
-	protectedValues []protectedText,
-) ([]string, error) {
-	if len(translations) != len(protectedValues) {
-		return nil, fmt.Errorf(
-			"Ollama returned %d translation elements, expected %d",
-			len(translations),
-			len(protectedValues),
-		)
-	}
-
-	cleanedTranslations := copyStrings(
-		translations,
-	)
-
-	for index := range cleanedTranslations {
-		cleanedTranslations[index] = strings.TrimSpace(
-			cleanedTranslations[index],
-		)
-
-		if cleanedTranslations[index] == "" {
+		translated, err := c.Translate(ctx, line)
+		if err != nil {
 			return nil, fmt.Errorf(
-				"Ollama returned empty translation element at index %d",
-				index,
+				"group validation failed (%v); translate line %d: %w",
+				lastErr,
+				i,
+				err,
 			)
 		}
+
+		result[i] = translated
 	}
 
-	restoredTranslations, err := restoreLines(
-		cleanedTranslations,
-		protectedValues,
-	)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"restore protected translation elements: %w",
-			err,
-		)
-	}
-
-	for index := range restoredTranslations {
-		restoredTranslations[index] = strings.TrimSpace(
-			restoredTranslations[index],
-		)
-
-		if restoredTranslations[index] == "" {
-			return nil, fmt.Errorf(
-				"translation element %d is empty after restoring protected values",
-				index,
-			)
-		}
-	}
-
-	return restoredTranslations, nil
-}
-
-func validationRetryPrompt(
-	basePrompt string,
-	validationErr error,
-	multipleLines bool,
-) string {
-	lineRule := "Keep every protected marker in the translated string."
-
-	if multipleLines {
-		lineRule = "Keep every protected marker in the same array element in which it appeared."
-	}
-
-	return fmt.Sprintf(
-		`%s
-
-CRITICAL RETRY INSTRUCTION:
-The previous response failed automatic validation: %v
-Correct the response instead of repeating the same mistake.
-- Copy every protected marker such as ⟦RMLOC_0000⟧ exactly, character for character.
-- Every protected marker must occur exactly once.
-- Do not translate, remove, duplicate, rename, reorder, or alter protected markers.
-- %s
-- Return only the JSON object required above.`,
-		basePrompt,
-		validationErr,
-		lineRule,
-	)
-}
-
-func truncateForLog(
-	text string,
-	maxRunes int,
-) string {
-	if maxRunes <= 0 {
-		return ""
-	}
-
-	runes := []rune(text)
-	if len(runes) <= maxRunes {
-		return text
-	}
-
-	return string(
-		runes[:maxRunes],
-	) + "…"
+	return result, nil
 }
 
 func (c *Client) chat(
 	ctx context.Context,
 	system, user string,
 	format json.RawMessage,
-	numPredict, numCtx int,
+	numPredict int,
 	result any,
 ) error {
-	ctx = normalizeContext(ctx)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	body, err := json.Marshal(
-		chatRequest{
-			Model:     c.model,
-			Stream:    false,
-			Think:     false,
-			KeepAlive: "10m",
-			Format:    format,
-			Options: chatOptions{
-				Temperature: 0,
-				NumPredict:  numPredict,
-				NumCtx:      numCtx,
-			},
-			Messages: []message{
-				{
-					Role:    "system",
-					Content: system,
-				},
-				{
-					Role:    "user",
-					Content: user,
-				},
-			},
+	body, err := json.Marshal(chatRequest{
+		Model:     c.model,
+		Stream:    false,
+		Think:     false,
+		KeepAlive: "10m",
+		Format:    format,
+		Options: chatOptions{
+			Temperature: 0,
+			NumPredict:  numPredict,
+			NumCtx:      translationNumCtx,
 		},
-	)
+		Messages: []message{
+			{Role: "system", Content: system},
+			{Role: "user", Content: user},
+		},
+	})
 	if err != nil {
-		return fmt.Errorf(
-			"marshal request: %w",
-			err,
-		)
+		return fmt.Errorf("encode Ollama request: %w", err)
 	}
 
-	return c.retryOperation(
-		ctx,
-		func(
-			ctx context.Context,
-		) error {
-			return c.executeChatRequest(
-				ctx,
-				body,
-				result,
-			)
-		},
-	)
+	for attempt := 0; attempt < requestAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		retry, err := c.executeChatRequest(ctx, body, result)
+		if err == nil || !retry || attempt == requestAttempts-1 {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+
+	return fmt.Errorf("ollama request attempts exhausted")
 }
 
 func (c *Client) executeChatRequest(
 	ctx context.Context,
 	body []byte,
 	result any,
-) error {
+) (bool, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
-
-	c.recordHTTPAttempt()
-	startedAt := time.Now()
 
 	request := fasthttp.AcquireRequest()
 	response := fasthttp.AcquireResponse()
 
-	defer fasthttp.ReleaseRequest(
-		request,
-	)
-
-	defer fasthttp.ReleaseResponse(
-		response,
-	)
-
-	request.Header.SetMethod(
-		fasthttp.MethodPost,
-	)
-
-	request.Header.SetContentType(
-		"application/json",
-	)
-
-	request.SetRequestURI(
-		c.baseURL + "/api/chat",
-	)
-
+	request.Header.SetMethod(fasthttp.MethodPost)
+	request.Header.SetContentType("application/json")
+	request.SetRequestURI(c.baseURL + "/api/chat")
 	request.SetBody(body)
-	requestErr := c.httpClient.DoTimeout(
+
+	err := c.httpClient.DoTimeout(
 		request,
 		response,
 		c.timeout,
 	)
 
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
+	status := response.StatusCode()
+	responseBody := append([]byte(nil), response.Body()...)
 
-		return ctxErr
+	defer fasthttp.ReleaseRequest(request)
+	defer fasthttp.ReleaseResponse(response)
+
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
 
-	if requestErr != nil {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
+	if err != nil {
+		return true, fmt.Errorf("request Ollama: %w", err)
+	}
 
-		return markRetryable(
+	if status != fasthttp.StatusOK {
+		return status == fasthttp.StatusTooManyRequests ||
+				status >= fasthttp.StatusInternalServerError,
 			fmt.Errorf(
-				"request Ollama: %w",
-				requestErr,
-			),
-		)
-	}
-
-	if response.StatusCode() != fasthttp.StatusOK {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
-
-		statusErr := fmt.Errorf(
-			"Ollama returned status %d: %s",
-			response.StatusCode(),
-			strings.TrimSpace(
-				string(
-					response.Body(),
-				),
-			),
-		)
-
-		if isRetryableStatus(
-			response.StatusCode(),
-		) {
-			return markRetryable(
-				statusErr,
+				"ollama returned HTTP %d: %s",
+				status,
+				strings.TrimSpace(string(responseBody)),
 			)
-		}
-
-		return statusErr
 	}
 
-	var chatResult chatResponse
-	if err := json.Unmarshal(
-		response.Body(),
-		&chatResult,
-	); err != nil {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
-
-		return markRetryable(
-			fmt.Errorf(
-				"unmarshal Ollama response: %w",
-				err,
-			),
-		)
+	var responseData chatResponse
+	if err := json.Unmarshal(responseBody, &responseData); err != nil {
+		return true, fmt.Errorf("decode Ollama response: %w", err)
 	}
 
-	if chatResult.Error != "" {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
-
-		return fmt.Errorf(
-			"Ollama error: %s",
-			chatResult.Error,
-		)
+	if responseData.Error != "" {
+		return false, fmt.Errorf("ollama error: %s", responseData.Error)
 	}
 
-	if strings.TrimSpace(
-		chatResult.Message.Content,
-	) == "" {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
-
-		return markRetryable(
-			fmt.Errorf(
-				"Ollama returned empty message content",
-			),
-		)
+	content := strings.TrimSpace(responseData.Message.Content)
+	if content == "" {
+		return true, fmt.Errorf("ollama returned empty content")
 	}
 
-	if err := json.Unmarshal(
-		[]byte(
-			chatResult.Message.Content,
-		),
-		result,
-	); err != nil {
-		c.recordFailedHTTPAttempt(
-			time.Since(startedAt),
-		)
-
-		return markRetryable(
-			&structuredResponseError{
-				content: truncateForLog(
-					chatResult.Message.Content,
-					300,
-				),
-				err: err,
-			},
-		)
+	if err := json.Unmarshal([]byte(content), result); err != nil {
+		return true, fmt.Errorf("decode translation JSON: %w", err)
 	}
 
-	c.recordSuccessfulHTTPResponse(
-		chatResult,
-		time.Since(startedAt),
-	)
-
-	return nil
+	return false, nil
 }
 
-func (c *Client) doSingleflightContext(
-	ctx context.Context,
-	key string,
-	operation func() (any, error),
-) (
-	any,
-	error,
-	bool,
-) {
-	ctx = normalizeContext(ctx)
-	resultChannel := c.requestGroup.DoChan(
-		key,
-		operation,
-	)
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err(), false
-
-	case result := <-resultChannel:
-		return result.Val, result.Err, result.Shared
-	}
-}
-
-func normalizeContext(
-	ctx context.Context,
-) context.Context {
-	if ctx == nil {
-		return context.Background()
-	}
-
-	return ctx
-}
-
-func (e *structuredResponseError) Error() string {
-	return fmt.Sprintf(
-		"unmarshal structured response %q: %v",
-		e.content,
-		e.err,
-	)
-}
-
-func (e *structuredResponseError) Unwrap() error {
-	return e.err
-}
-
-func isStructuredResponseError(
-	err error,
-) bool {
-	var target *structuredResponseError
-	return errors.As(
-		err,
-		&target,
-	)
-}
-
-func copyStrings(
-	values []string,
-) []string {
-	result := make(
-		[]string,
-		len(values),
-	)
-
-	copy(
-		result,
-		values,
-	)
-
-	return result
-}
-
-func (e *translationValidationError) Error() string {
-	return fmt.Sprintf(
-		"translation validation failed after %d attempts: %v",
-		e.attempts,
-		e.err,
-	)
-}
-
-func (e *translationValidationError) Unwrap() error {
-	return e.err
-}
-
-func isTranslationValidationError(
-	err error,
-) bool {
-	var target *translationValidationError
-
-	return errors.As(
-		err,
-		&target,
-	)
+func copyStrings(values []string) []string {
+	return append([]string(nil), values...)
 }
